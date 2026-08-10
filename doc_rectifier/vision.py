@@ -3,6 +3,38 @@ detection cascade (Methods A-E), and perspective rectification.
 
 All functions here operate on a caller-supplied image array; they never touch
 PDFs or disk except for optional debug dumps under Config.debug_dir.
+
+References (prior art this module's approach is built on):
+  - Dropbox Eng, "Fast and Accurate Document Detection for Scanning" --
+    line detection -> intersection -> quad enumeration -> perimeter scoring;
+    the structure behind _method_b_lines / detect_boundary's Method B.
+    https://dropbox.tech/machine-learning/fast-and-accurate-document-detection-for-scanning
+  - Tropin et al., "Advanced Hough-based method for on-device document
+    localization" -- production Hough-based quad detection under compute
+    constraints, informing the top-k line candidate + scoring approach.
+    https://arxiv.org/abs/2106.09987
+  - LearnOpenCV, "Automatic Document Scanner using OpenCV" -- morphological
+    text-blanking + GrabCut background removal; the basis for Method C
+    (_method_c_grabcut).
+    https://learnopencv.com/automatic-document-scanner-using-opencv/
+  - Silva, Lins et al. (2009), "Automatically Deciding if a Document was
+    Scanned or Photographed" -- >99.9% accuracy with classical hand-crafted
+    features, the evidence base for classify_page's weighted-signal approach
+    (no ML needed for this specific classification problem).
+    https://jucs.org/jucs_15_18/automatically_deciding_if_a/jucs_15_18_3364_3375_silva.pdf
+  - Docutain SDK blog, "Edge Detection for Image Processing" -- demonstrates
+    why fixed-parameter Canny fails on textured backgrounds (the wooden-floor
+    example); motivates the bilateral-filter + auto-Canny approach in
+    detect_boundary's shared preprocessing, and was directly relevant when
+    debugging Method A's real-photo failure (see README "Bugs the real
+    photos caught").
+    https://sdk.docutain.com/blogartikel/edge-detection-for-image-processing
+  - Filestack blog, "Document Detection and Preprocessing API" -- production
+    pipeline confirming the edge map -> Hough lines -> intersections ->
+    perspective transform structure; their deep-model edge maps are out of
+    scope here (Constraint 1), so GrabCut (Method C) stands in as the
+    classical analogue of their segmentation mask.
+    https://blog.filestack.com/document-detection-enhancement-and-preprocessing-api/
 """
 from __future__ import annotations
 
