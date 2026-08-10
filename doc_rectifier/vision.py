@@ -65,7 +65,7 @@ class Config:
     angle_tolerance_deg: float = 35.0
     side_ratio_min: float = 0.5
     side_ratio_max: float = 2.0
-    text_containment_floor: float = 0.15
+    text_containment_floor: float = 0.6
     text_containment_score_weight: float = 0.3
     min_text_blobs: int = 3
     min_text_mask_pixels: int = 200
@@ -504,15 +504,16 @@ def _validate_quad(quad: np.ndarray, shape: Tuple[int, int], text_mask: Optional
         if not (config.side_ratio_min <= ratio <= config.side_ratio_max):
             return False, "side_ratio"
 
-    # text_containment_min is intentionally NOT enforced here as a hard gate.
-    # On real photos, text_mask itself is noisy (it can pick up a fragment of
-    # the page's own edge, or miss real low-contrast print almost entirely),
-    # and a geometrically-correct quad was repeatedly vetoed by that noise
-    # during testing. Only reject on a much lower sanity floor -- still
-    # enough to kill a quad that plainly doesn't touch the text at all
-    # (the spec's patterned-background case) -- and let Method B's scoring
-    # use the fuller ratio (_text_containment_ratio) as a soft preference
-    # instead of a veto.
+    # detect_boundary already nulls text_mask out when it has too few blobs to
+    # trust (see min_text_blobs) -- so by the time text_mask reaches here, it's
+    # already been screened as a reasonably reliable "where the real text is"
+    # signal, and a real hard floor is safe. This matters: a candidate quad
+    # can score well on pure edge-perimeter strength (a strong internal fold
+    # or a printed divider line) while still cropping off a large fraction of
+    # real content -- e.g. missing a receipt's low-contrast top edge caused
+    # Method B to settle for an internal line, silently truncating the header.
+    # 0.6 was picked with real photos in hand: every correctly-detected quad
+    # measured >=0.88 containment; the truncating one measured 0.38.
     if text_mask is not None and np.count_nonzero(text_mask) > config.min_text_mask_pixels:
         if _text_containment_ratio(quad, shape, text_mask) < config.text_containment_floor:
             return False, "text_containment"
