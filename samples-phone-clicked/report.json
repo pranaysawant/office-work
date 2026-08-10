@@ -1,0 +1,421 @@
+{
+  "input_path": "samples-phone-clicked/pdfs/Original-Form-2.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.4623039432117806,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 0.8622991256713868,
+        "illumination": 0.8,
+        "sharpness": 0.25000602192549226,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "contour_quad",
+      "corners_px": [
+        [
+          29.0,
+          21.0
+        ],
+        [
+          726.0,
+          20.0
+        ],
+        [
+          747.0,
+          1003.0
+        ],
+        [
+          20.0,
+          997.0
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.40.34_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 1.883948831526943,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": -0.6,
+        "border": 1.0,
+        "illumination": 0.8,
+        "sharpness": 0.12478942915091149,
+        "text_geometry": 0.09465208018746708
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          161.76968383789062,
+          192.0
+        ],
+        [
+          701.529541015625,
+          192.0
+        ],
+        [
+          713.3385009765625,
+          962.958251953125
+        ],
+        [
+          149.245849609375,
+          973.0313110351562
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.40.59_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.6615579793174016,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 0.8981026566818222,
+        "illumination": 0.8,
+        "sharpness": 0.45431915329447425,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          191.50967407226562,
+          32.0
+        ],
+        [
+          290.585205078125,
+          32.0
+        ],
+        [
+          281.88671875,
+          573.0458374023438
+        ],
+        [
+          163.8997039794922,
+          566.943115234375
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.41.13_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.4961059525275378,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": -0.6,
+        "border": 1.0,
+        "illumination": 0.8,
+        "sharpness": 0.8163533324998514,
+        "text_geometry": 0.14820298775241514
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          70.50071716308594,
+          68.30474853515625
+        ],
+        [
+          395.1355895996094,
+          74.06749725341797
+        ],
+        [
+          410.7684020996094,
+          543.052490234375
+        ],
+        [
+          45.39811706542969,
+          536.1260375976562
+        ]
+      ],
+      "warnings": [
+        "curled_page_suspected"
+      ]
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.41.28_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.0331374356883822,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.0,
+        "border": 0.5922618162287225,
+        "illumination": 0.8,
+        "sharpness": 0.3176536538735416,
+        "text_geometry": 0.13341154214620574
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          41.705726623535156,
+          39.44984817504883
+        ],
+        [
+          448.46893310546875,
+          54.08161544799805
+        ],
+        [
+          457.5820617675781,
+          580.3649291992188
+        ],
+        [
+          32.291595458984375,
+          565.69970703125
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.41.42_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.4641905962924913,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 1.0,
+        "illumination": 0.6493226450874274,
+        "sharpness": 0.3250889470985444,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "contour_quad",
+      "corners_px": [
+        [
+          49.0,
+          17.0
+        ],
+        [
+          356.0,
+          13.0
+        ],
+        [
+          377.0,
+          556.0
+        ],
+        [
+          40.0,
+          544.0
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.42.07_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.7046123021567654,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 0.9425017095965353,
+        "illumination": 0.8,
+        "sharpness": 0.45263824070028735,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "contour_quad",
+      "corners_px": [
+        [
+          66.0,
+          12.0
+        ],
+        [
+          335.0,
+          26.0
+        ],
+        [
+          386.0,
+          617.0
+        ],
+        [
+          64.0,
+          626.0
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.42.21_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.4051364160876525,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.0,
+        "border": 0.28793705510688694,
+        "illumination": 0.8,
+        "sharpness": 0.7307498836474995,
+        "text_geometry": 0.4478176855116054
+      },
+      "action": "passthrough",
+      "method": "text_deskew",
+      "corners_px": null,
+      "warnings": [
+        "deskew_only_no_boundary",
+        "noop_quad"
+      ]
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.42.38_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.6950802768433824,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 1.0,
+        "illumination": 0.8,
+        "sharpness": 0.33618176275628536,
+        "text_geometry": 0.023758969671230926
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          91.75833129882812,
+          674.0521850585938
+        ],
+        [
+          689.90380859375,
+          705.0670776367188
+        ],
+        [
+          682.8682861328125,
+          1117.2332763671875
+        ],
+        [
+          91.75833129882812,
+          1117.2332763671875
+        ]
+      ],
+      "warnings": [
+        "curled_page_suspected"
+      ]
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.42.50_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.232818651334211,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 0.7763744878785078,
+        "illumination": 0.8,
+        "sharpness": 0.07055520431962892,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "contour_quad",
+      "corners_px": [
+        [
+          20.0,
+          20.0
+        ],
+        [
+          671.0,
+          20.0
+        ],
+        [
+          696.0,
+          940.0
+        ],
+        [
+          96.0,
+          965.0
+        ]
+      ],
+      "warnings": []
+    }
+  ]
+}
+{
+  "input_path": "samples-phone-clicked/pdfs/Screenshot_2026-08-10_at_5.43.02_PM.pdf",
+  "pages": [
+    {
+      "page": 1,
+      "page_type": "phone_photo",
+      "confidence": 2.5127545760551193,
+      "signals": {
+        "exif": 0.0,
+        "dimensions": 0.6,
+        "border": 0.9347884921363443,
+        "illumination": 0.8,
+        "sharpness": 0.22245760489846875,
+        "text_geometry": 0.0
+      },
+      "action": "rectified",
+      "method": "line_quad_scoring",
+      "corners_px": [
+        [
+          309.30938720703125,
+          71.0
+        ],
+        [
+          474.4929504394531,
+          71.0
+        ],
+        [
+          461.68597412109375,
+          980.296142578125
+        ],
+        [
+          264.6061706542969,
+          970.0315551757812
+        ]
+      ],
+      "warnings": [
+        "curled_page_suspected"
+      ]
+    }
+  ]
+}
