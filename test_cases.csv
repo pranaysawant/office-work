@@ -1,0 +1,30 @@
+case_id,kind,subject,expected_rule_ids,expected_recipients,note
+TC001,POS,File Accepted - 1272_3696_HSE_P,DUMMY-2228-001|DUMMY-2228-002|DUMMY-2228-003|DUMMY-2228-010|DUMMY-2228-018|DUMMY-2228-020|DUMMY-2228-022|DUMMY-2228-036,dummy.d01@example.com|dummy.shared@example.com|dummy.d02@example.com|dummy.d03@example.com|dummy.d10@example.com|dummy.d18@example.com|dummy.d20@example.com|dummy.d22@example.com|dummy.d36@example.com,"core HSE subject, hits 8 rules incl dedupe"
+TC002,POS,File Accepted - 1272_3696_EHS_P,DUMMY-2228-001|DUMMY-2228-009|DUMMY-2228-018|DUMMY-2228-036,dummy.d01@example.com|dummy.d09@example.com|dummy.d18@example.com|dummy.d36@example.com,"EHS variant, ENDS_WITH + ANY_OF"
+TC003,POS,RE: File Accepted - 1272_3696_HSE_P,DUMMY-2228-001|DUMMY-2228-002|DUMMY-2228-003|DUMMY-2228-008|DUMMY-2228-018|DUMMY-2228-022|DUMMY-2228-036,dummy.d01@example.com|dummy.shared@example.com|dummy.d02@example.com|dummy.d03@example.com|dummy.d08@example.com|dummy.d18@example.com|dummy.d22@example.com|dummy.d36@example.com,STARTS_WITH RE: plus the HSE rules
+TC004,POS,Online Portal Hold And Release UPLOAD Notification,DUMMY-2228-006,dummy.d06@example.com,EXACT match only
+TC005,NEG,Online Portal Hold And Release UPLOAD Notification**,,,EXACT must reject a superstring
+TC006,POS,Online Portal Hold And Release UPLOAD Notification** - 1272_3696_HSE_P,DUMMY-2228-018|DUMMY-2228-022|DUMMY-2228-035,dummy.d18@example.com|dummy.shared@example.com|dummy.d22@example.com|dummy.d35@example.com,special chars rule
+TC007,POS,TEST,DUMMY-2228-005|DUMMY-2228-007,dummy.d05@example.com|dummy.d07@example.com,must hit only D05/D07 - proves D28-D31 excluded
+TC008,POS,PING,DUMMY-2228-007,dummy.d07@example.com,second EXACT alternative under ANY
+TC009,POS,TESTING-EMAIL from vendor,DUMMY-2228-004|DUMMY-2228-005,dummy.d04@example.com|dummy.d05@example.com,"ANY logic, out-of-order seq"
+TC010,POS,DUMMY-EMAIL please ignore,DUMMY-2228-004|DUMMY-2228-005,dummy.d04@example.com|dummy.d05@example.com,"ANY logic, other member"
+TC011,POS,ESDF submission pending,DUMMY-2228-012|DUMMY-2228-013|DUMMY-2228-023,dummy.d12@example.com|dummy.d13@example.com|dummy.d23@example.com,FUZZY at 60/80/90
+TC012,POS,Shipment Manifest Confirmation for Order 88,DUMMY-2228-014,dummy.d14@example.com,FUZZY at 95
+TC013,POS,Shipment Manifest,DUMMY-2228-014,dummy.d14@example.com,FUZZY subset scores 100 even at 95
+TC014,POS,Quarterly Compliance Report,DUMMY-2228-015,dummy.d15@example.com,FUZZY at 100
+TC015,POS,Quarterly Compliance Report v2,DUMMY-2228-015,dummy.d15@example.com,FUZZY 100 still matches a superstring
+TC016,POS,INVOICE 445 payment due,DUMMY-2228-016|DUMMY-2228-017,dummy.d16@example.com|dummy.d17@example.com,ANY_OF plus CONTAINS PAYMENT
+TC017,POS,Invoice Reminder - 445,DUMMY-2228-016|DUMMY-2228-017,dummy.d16@example.com|dummy.d17@example.com,FUZZY phrase plus ANY_OF
+TC018,POS,PAYROLL update for August,DUMMY-2228-021,dummy.d21.first@example.com|dummy.d21.list@example.com|dummy.d21.third@example.com,three recipients
+TC019,POS,BENEFITS enrolment open,DUMMY-2228-026,dummy.d26.active@example.com,"one recipient inactive, one active"
+TC020,POS,FW: ESCALATION - portal down,DUMMY-2228-011|DUMMY-2228-019,dummy.d11@example.com|dummy.d19@example.com,ANY logic STARTS_WITH/CONTAINS + six-operator rule
+TC021,POS,URGENT server down,DUMMY-2228-024,dummy.d24@example.com,"inactive condition removed, rule survives"
+TC022,POS,SINGLE-ANY probe,DUMMY-2228-034,dummy.d34@example.com,single condition under ANY
+TC023,POS,file accepted - lowercase check,DUMMY-2228-001|DUMMY-2228-036,dummy.d01@example.com|dummy.d36@example.com,case insensitivity
+TC024,POS,NOWHERE-TO-GO notice,DUMMY-2228-027,,matches D27 but forwards to nobody
+TC025,NEG,Lunch tomorrow?,,,must match nothing
+TC026,NEG,ORPHANED record found,,,D25 all conditions inactive - must not match
+TC027,NEG,ALSO-ORPHANED entry,,,D25 second inactive condition - must not match
+TC028,NEG,ZZ_NEVER_PRESENT flag,,,inactive condition of D24 - must not match alone
+TC029,NEG,Random vendor newsletter,,,plain no-match
