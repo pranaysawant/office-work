@@ -611,3 +611,15 @@ flowchart TD
 ```
 
 Stage 7 is not needed here: the cell was matched in Stage 6. The score of 0.66 comes from the number 25 agreeing and the chunks "cop" and "opa" matching.
+
+
+
+
+echo "IP:      $(ipconfig getifaddr en0 2>/dev/null)$(ipconfig getifaddr en1 2>/dev/null)"
+echo "Gateway: $(netstat -rn -f inet | awk '/^default/{print $2" via "$NF; exit}')"
+echo "Wi-Fi:   $(networksetup -getairportnetwork en0 2>/dev/null | sed 's/.*: //')"
+echo "Tunnels: $(ifconfig 2>/dev/null | grep -cE '^(utun|ipsec)[0-9]+:.*RUNNING') running"
+scutil --nc list 2>/dev/null | grep -i connected || echo "VPN:     none connected (per scutil)"
+echo "--- can it even see the mini? ---"
+ping -c 3 -t 3 192.168.0.223
+nc -vz -w 3 192.168.0.223 8088
