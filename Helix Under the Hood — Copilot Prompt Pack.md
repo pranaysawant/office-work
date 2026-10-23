@@ -33,8 +33,8 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 00 | 00-big-picture.md | What Helix is, every service, one case end to end | — | Done |
 | 00T | 00t-temporal-primer.md | Temporal from zero, using Helix's real Temporal code | Sonnet, medium | Done |
 | 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Done |
-| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, gate signals | Opus, medium | Must, next |
-| 04 | 04-failure-recovery.md | Failure scenarios in code and design | Opus, medium | Must |
+| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, gate signals | Opus, medium | Done |
+| 04 | 04-failure-recovery.md | How agents survive real failures: verdicts, gaps, fixes | Opus, high | Must, next |
 | 13 | 13-llm-layer.md | Models, prompts, UAIS, quality measurement | Opus, medium | Must |
 | 07 | 07-deploy-scale.md | Helm, KEDA, cells, Azure services, load tests | Sonnet, medium | Must |
 | 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must |
@@ -129,17 +129,17 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in 00-big-picture.md, 00t-temporal-primer.md, 01-orchestration.md
+# Helix facts - verified in 00, 00t, 01 and 02 study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
 Temporal concepts: helix-study/00t-temporal-primer.md. Orchestrator and gate design:
-helix-study/01-orchestration.md.
+helix-study/01-orchestration.md. Agents, gate rules, thresholds: helix-study/02-agents-layer.md.
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
               identity_policy, trust_boundary/memory_broker, libs/*, agents/ worker
 Stubs inside: intake AV scan, in-memory blob store, PHI key, dedup, case-id counter,
-              capability-token minting
+              capability-token minting, write_non_phi_blob (returns its input)
 Schema only:  orchestrator_svc (cases, effect_ledger), gate_svc (gates, decisions),
               audit_svc (audit_log, outbox), trust_boundary/phi_broker
 Empty:        review_console_svc, connector_broker, llm_broker, agent_sandbox_adapter,
@@ -147,7 +147,8 @@ Empty:        review_console_svc, connector_broker, llm_broker, agent_sandbox_ad
 NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no worker),
               code reading MCS_workflow_config_v1.json, .proto / gRPC, outbox poller,
               Lane A consumer, Registry /triggers route, Cell Router /start route,
-              workflow patching, continue-as-new, Gate Service API, sweeper
+              workflow patching, continue-as-new, Gate Service API, sweeper,
+              runtime telemetry (Prometheus / OTel) in agents and the wrapper
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -165,7 +166,7 @@ Signal:  services/trigger_gateway_svc/src/trigger_gateway_svc/dispatch/signal_di
          signal name trigger:<step> (services/libs/helix_trigger_lib/src/helix_trigger_lib/route.py:L32-L34)
 Worker:  agents/src/agents/worker.py:L1-L94; agents/src/agents/registry.py:L9-L49
 Wrapper: services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/
-         wrapper.py:L1-L136; envelope.py:L49-L113; broker_clients.py:L22-L115
+         wrapper.py:L1-L136; envelope.py:L24-L113; contract.py; artifacts.py; broker_clients.py
 Only runnable workflows (tests / perf):
          agents/tests/activity/_dummy_chain_probe_workflow.py:L9-L33
          agents/tests/activity/test_dummy_agents_worker_e2e.py:L16-L42
@@ -177,16 +178,15 @@ Scaling: infra/helm/agents-worker/values.yaml, templates/scaledobject.yaml
 Activity registration: @agent_activity -> temporalio.activity.defn(name=agent_id)
   (wrapper.py:L36-L45, L136). Bad input -> failed_envelope "VALIDATION_ERROR" (L106);
   core_fn runs with BrokerError uncaught, so Temporal retries it (L112).
-Heartbeat: only reasoning_loop agents call heartbeat({"iteration", "note"})
-  (wrapper.py:L55-L72); single-shot agents use a no-op (L49-L53). Wired when the
-  first loop agent (logo-agent) is ported.
+Heartbeat: only reasoning_loop / harness_loop agents get report_progress -> heartbeat
+  (wrapper.py:L55-L81); single-shot agents use a no-op. logo drops it on its core path.
 Worker: TEMPORAL_NAMESPACE default "default" (worker.py:L21); CORE_AGENTS_QUEUE_CLASS
   all | deterministic | llm picks the queues (L33-L40); one Worker per queue via
   asyncio.gather (L83-L86); production = one Deployment per class, "all" is for dev (L1-L6).
   registry.py "dummy" profile registers only the two dummy agents (L15-L22).
 Test chain: DummyChainProbeWorkflow, id probe-dummy-chain-wf, queue core-agents-deterministic,
   start_to_close 30 s per activity (_dummy_chain_probe_workflow.py:L16, L27) - the only
-  timeout in code; WorkflowEnvironment.start_local() (test_dummy_agents_worker_e2e.py:L18).
+  timeout passed in code; WorkflowEnvironment.start_local() (test_dummy_agents_worker_e2e.py:L18).
 Cell Router start method (temporal_client.py:L106-L200): named start_workflow but calls
   execute_workflow (blocks up to the 30-day run timeout); TypeError from workflow= plus a
   positional input; wrong keyword workflow_id_reuse_policy (Python SDK: id_reuse_policy);
@@ -221,16 +221,56 @@ gates: gate_type confidence | policy | exception (HITL spec lists 5); status
   open | resolved | escalated | terminal; terminal_disposition failed | park; resolution_type
   approve | override | correction | reject | escalate | timeout; index WHERE status='open'.
   decisions: PK gate_id, no PHI.
-Code shapes: GateSignal {rule_id, severity, evidence} (io_models/base.py:L25-L30);
-  CaseContext {current_state, prior_step_outcomes, blob_pointers} (base.py:L47-L60).
-  Confidence thresholds live in agent mappers (ntdc_agent/mappers.py:L66-L77); validation
-  gate signals flow into annotate's input (validation_agent/mappers.py:L95-L131,
-  annotation_agent/mappers.py:L24); annotate reads artifact paths from disk (L35).
 Gate design: dehydrate when expected dwell > ~1 h (provisional, arch 6.8); saved state
   {pinned_versions, last_context_snapshot_ref, resume_at_step_id}; sweeper CronJob ~60 s;
   gate token EdDSA JWT, 2 h in-run / 24 h dehydrated; single-winner
   UPDATE ... WHERE status='open'; reviewer holds required_role and is not the submitter.
 Spec says agent status ok | needs_gate | failed; code says success | needs_gate | failed.
+
+## Agents layer (02)
+Agent folder: activity.py (entry), core/ (legacy code, unchanged), mappers.py (contract <-> core),
+  contract/<agent>.contract.json (the real schema authority, loaded at import by contract.py),
+  data_model/ and io_models/base.py (reference models, unused at runtime), payload_template.json
+  (nested; activities need a flat dict; only the demo notebook flattens it).
+Wrapper modes: automatic (core_fn + input_mapper + output_normalizer, wrapper.py:L104-L134);
+  custom (decorated function is the whole body; segmentation uses it for its global pipeline_lock).
+Input check: presence only on input.payload and step_config, no types, case_id unchecked
+  (contract.py:L73-L93). Output check: dynamic pydantic model, extra=forbid (contract.py:L212-L260);
+  a failure returns CONTRACT_OUTPUT_VALIDATION_ERROR after the work ran.
+Gate status: needs_gate if ANY signal, severity ignored; hitl_required set but unread
+  (envelope.py:L86-L91). Code emits 24 rule ids (DETECT_LANG_*, SEG_*, LOGO_*, NTDC_*, BISU_*,
+  TR_SUB_AGENT_FAILED); 15 other ids exist only in contracts. Thresholds hard-coded per mapper,
+  overridable by step_config.metric_thresholds. Only detect-lang reads contract gate_conditions.
+  Full table: 02 section 8a.
+Agents: deterministic queue - dummy1, dummy2, detect-lang, segmentation (calls GPT-4.1 and Gemini
+  anyway), validation, ntdc, bisu, annotate; llm queue - logo, translation-review.
+  validation runs logo, ntdc and bisu in-process in a ThreadPoolExecutor
+  (agents/src/agents/activities/validation_agent/activity.py:L101-L107) and collects their signals;
+  annotate reads them from final_agent_output.json and emits no signals itself.
+  translation-review runs segmentation, the validation children and annotate in ONE activity.
+  NTDC = Numbers, Dates, Times, Currencies; BISU (not expanded in code) = bold, italic,
+  underline, font size.
+LLMs (called directly, not through brokers): segmentation GPT-4.1 mapping + GPT-4.1 judge +
+  Gemini embeddings + Azure DI; logo gpt-4o (fallback gpt-4.1, o4-mini, 240 s call timeout);
+  ntdc GPT-4.1 optional (use_llm default true); bisu Gemini on Vertex AI (thresholds.json
+  llm_review.enabled true; step_config.use_llm ignored). Segmentation core: LLM_TIMEOUT 120,
+  LLM_MAPPING_MAX_CONCURRENCY 6, MAX_PAGES 20. core/config.json holds developer paths and a key-file path.
+logo: contract says harness_loop, max_iterations 3, exit at 0.85; core is one linear pass
+  with a model fallback list.
+Handoff: local file paths. Artifacts in /tmp/helix-artifacts/<case>/downstream_artifacts/<agent>
+  (artifacts.py:L81-L83); segmentation uses SEGMENTATION_ARTIFACTS_ROOT. No shared volume in
+  the Helm chart. Segmentation returns mapped_regions and the run_summary mapping list by value,
+  so they enter Temporal history.
+Contract activity_options are data only (nothing reads them): 30 s for deterministic agents,
+  120 s for logo and translation-review, max attempts 3, logo heartbeat 30 s.
+Raised although not healable, so Temporal retries: ntdc LanguagePairError,
+  annotate FileNotFoundError.
+Versions: contract_version 1.0.0 everywhere, never compared; activity name = bare agent_id,
+  so two versions of one agent cannot run side by side.
+Quality metrics are self-referential: align_f1 treats every mapping as correct; ntdc and logo
+  use proxies; segmentation ece fixed at 0.0. Metric code:
+  services/libs/helix_platform_libs/src/helix_platform_libs/evaluation_framework/metrics.py.
+linguistic-agent-contract.json: draft for an 11th agent (linguist-agent), loaded by nothing.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
@@ -244,16 +284,18 @@ Designed retry (docs only, docs/AGENT_INVOCATION_UNIFIED_FLOW.md Phase 2): initi
 MCS SLA: end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
 Designed scale: 1B+ runs/year, ~32 starts/s average; p95 < 2 s deterministic step,
       < 8 s AI step. Orchestrator pool: D4s_v5, 1-5 nodes, 3 workers (04 doc).
+Broker HTTP timeout 20 s; broker URLs default to localhost:8081 / 8082.
 
 ## Design decisions already summarised
 00t part 10: spec 2.2 (Little's Law, Cassandra, dehydrate), ADR 0011, ADR 0019.
 01 sections 7.9 and 9: ADR 0004, 0006, 0012, 0020, 0023.
+02 sections 3 and 9: ADR 0011 in practice (logo loop), ADR 0019 gaps (paths, values in history).
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
  confidence, errors, sla, audit_entry}
 Business failures are RETURNED as failed envelopes (Temporal sees success, no retry).
-Broker errors are RAISED (Temporal retries). needs_gate = any gate signal present.
+Broker errors are RAISED (Temporal retries).
 
 ## MCS workflow (services/MCS_workflow_config_v1.json, config only, nothing reads it)
 detect-lang-agent -> segmentation-agent -> validation-agent -> annotate-agent
@@ -293,6 +335,15 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 - Section 8 says history shards are "fixed at namespace creation". In Temporal the shard count is fixed when the cluster is created and covers every namespace in it. Say "cluster" in interviews.
 - Section 7.1 calls an `EscalateGate` activity. That name is Copilot's; the docs' activity list does not include it.
 - One gap the file missed: the trigger rejects a same-state update, and activities retry. If `WriteOutcome` commits and its worker dies before reporting back, the retry writes the same status again and fails. Good to raise in an interview; the fix is in the TransQA Mini lessons.
+
+**02-agents-layer.md**
+
+- Sections 7b–7d are scrambled: duplicated headings and code lines mixed into prose. A few table headers are broken (section 5 metrics table, the confidence table in 7b, the segmentation config row in 8d). Ask Copilot in the same chat: "In 02-agents-layer.md, rewrite sections 7b, 7c and 7d cleanly and fix the broken table headers in sections 5, 7b and 8d. Change nothing else."
+- The numbers in section 5 (42 blocks, 37 mappings, 84 s duration, timestamps) are an example Copilot made up to show the math. The formulas are real; the values are not measured. Never quote them as results.
+- Missed point 1, hidden queueing: segmentation holds a global lock, and its pool has 32 threads. Once a worker accepts a task it leaves the queue backlog, so tasks waiting for the lock inside a pod are invisible to KEDA, and their start-to-close clocks are already running. With the contract's 30 s timeout, the waiting ones would time out and retry, paying for LLM calls again.
+- Missed point 2, gate in the wrong place: the MCS config puts the human gate on annotate, but annotate never returns needs\_gate; segmentation and validation do. Under the designed "needs\_gate raises a gate" rule, the case would pause at steps that have no gate policy, and the design does not say what happens then.
+- Missed point 3, pins that cannot be honoured: PinVersions pins agent versions, but each activity is registered under its bare agent\_id, so a worker runs only one version. A case pinned to an older version cannot get it without versioned activity names or Temporal Worker Versioning.
+- Missed point 4, history size and privacy: segmentation returns its mapping list by value. If that list carries text spans, document text lands in Temporal history (against ADR 0019), and a long document can pass Temporal's payload limit (about 2 MB by default).
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -481,12 +532,21 @@ Senior panels spend the most time here. The scenarios now match what exists: the
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Temporal failure concepts and the return-vs-raise trade-off are in
-helix-study/00t-temporal-primer.md part 7. Orchestrator-design failures (ledger gap,
-rehydration ID policy, trigger conflicts, sweeper index) are in 01 section 9.
-Refer to both; do not repeat them.
+Refer to, do not repeat: 00t part 7 (Temporal failure concepts, return vs raise),
+01 section 9 (orchestrator-design failures), 02 sections 7a and 9 (agent-level errors).
 
-Topic: What happens when things fail in Helix - in the code that exists, and in the design.
+Changes for this file:
+- Act as a principal engineer reviewing Helix before a production launch. First describe
+  what the code does, tagged; then judge it plainly.
+- [IDEA] is allowed in every scenario, not only in a weak-points section. Each idea must
+  name a concrete mechanism (a setting, a pattern, a table, a Temporal feature), not a slogan.
+- Use this shape instead of STYLE's 12 sections: 1 one-line answer; 2 altitude 30,000 ft;
+  Part A; Part B; Interview Q&A; Glossary; Files read.
+- When no retry policy is passed, Temporal's default applies (unlimited attempts, backoff
+  1 s doubling to 100 s). Say for each scenario which policy applies today.
+
+Topic: How Helix agents survive real-world failures - what exists, what breaks,
+and what a production-grade design would do instead.
 
 Read:
 - services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/broker_clients.py
@@ -497,38 +557,93 @@ Read:
   (search cell_router_svc for "sweep")
 - services/trigger_intake_svc/src/trigger_intake_svc/dedup/idempotency_store.py
 - vendor-kit/schemas/error-taxonomy.json
+- agents/src/agents/activities/segmentation_agent/core/src/pipeline.py: only pipeline_lock,
+  where LLM_TIMEOUT and MAX_PAGES are applied, and any retry loop around LLM calls
+- agents/src/agents/activities/logo_agent/core/logo_agent.py L400-L430 (model fallback)
+- agents/src/agents/activities/ntdc_agent/core/NTDC_Agent/llm.py (retry and error handling only)
+- agents/src/agents/activities/validation_agent/activity.py L95-L140 (child failures, thread pool)
 - docs/AGENT_INVOCATION_UNIFIED_FLOW.md (Phase 2 retry section only)
 - docs/adr/ 0022 and 0029 (Decision only)
 
-For each scenario: what happens step by step, the final state, each step tagged
-[CODE] or [DOCS-ONLY].
-A. An LLM or Document Intelligence call times out inside an agent.
-B. An agent raises an unexpected exception (not BrokerError).
-C. An agent returns a failed envelope.
-D. The agents worker pod is killed mid-activity. With no heartbeat on single-shot
-   agents, when does Temporal notice, and what runs again?
-E. Cell Router crashes after writing the workflow_directory row, before the Temporal
-   start. What does the sweep do (grace 5 min, interval 10 min, batch 100)?
-F. Temporal is down when Cell Router tries to start a workflow.
-G. The same upload is sent twice: with and without an Idempotency-Key header,
-   and across two Intake replicas (in-memory stores).
-H. A poison message (MissingCaseId) reaches the Trigger Gateway: redelivery and dead-letter.
-I. A bad agent version is released (ADR 0022 recall and quarantine).
-J. WriteOutcome commits, then its worker dies before reporting back. The retry writes
-   the same status, and the cases trigger rejects same-state updates. What happens?
-K. A broker returns 4xx (permanent) vs 5xx (transient): does broker_clients.py
-   tell them apart, or does every error retry?
+Part A - scenarios. For each one write exactly these five labelled lines:
+  What happens: the steps, each tagged [CODE] or [DOCS-ONLY]
+  Verdict: SURVIVES / DEGRADES / BREAKS, and the final state of the case
+  Blast radius: one case, one pod, one queue, one tenant, or everyone
+  Better design [IDEA]: the concrete fix
+  Interview answer: 2-3 sentences I can say out loud
 
-Then answer:
-1. error-taxonomy.json: categories, retryable or not, where code uses it
-   ([NOT FOUND] if unused).
-2. Designed retry policy vs what code sets today. Where should it be set,
-   given the workflow config schema has no field for it?
-3. Exactly-once in the code that exists: which side effects could run twice today?
-4. Failures not handled today: one line each, ranked by risk.
+Infrastructure and platform
+A. The agents worker pod is killed mid-activity (no heartbeat on single-shot agents).
+B. 10 segmentation tasks reach one pod with a 32-thread pool and pipeline_lock.
+   Are the waiting tasks visible to the KEDA backlog metric? Do their timeouts tick?
+C. Temporal is down for 5 minutes, then recovers: backlog, retries and KEDA afterwards.
+D. Cell Router crashes after writing the workflow_directory row, before the Temporal start
+   (sweep: grace 5 min, interval 10 min, batch 100).
+E. The same upload twice: with and without Idempotency-Key, across two Intake replicas.
+F. A poison message (MissingCaseId) reaches the Trigger Gateway.
+
+LLM and external services
+G. One LLM call hangs (LLM_TIMEOUT 120 s) while the contract activity timeout is 30 s.
+H. Azure OpenAI returns 429 rate limits for 10 minutes at peak load.
+I. One model provider is down for an hour (fallbacks exist only in logo's model list).
+J. The LLM returns malformed JSON, a refusal, or a truncated answer (max tokens hit).
+K. The model behind an endpoint changes silently and quality drops.
+L. A 300-page PDF arrives (MAX_PAGES 20): memory, time and cost.
+
+Agents and data
+M. ntdc raises LanguagePairError, or annotate raises FileNotFoundError (bad input, raised).
+N. One validation child (logo) fails while ntdc and bisu succeed.
+O. A step's output file is missing on the next pod (local-path handoff).
+P. A bad agent version is released (ADR 0022 recall and quarantine).
+Q. A broker returns 4xx vs 5xx: does broker_clients.py tell them apart?
+
+Part B - cross-cutting
+1. error-taxonomy.json: categories, retryable or not, where code uses it ([NOT FOUND] if unused).
+2. Retry budget: the worst-case number of LLM calls for one document if every layer retries
+   (activity attempts x retries inside core x model fallbacks). Use real numbers from code,
+   contracts and Temporal defaults, and show the multiplication.
+3. Exactly-once today: which side effects could run twice (LLM calls, files, blob writes,
+   Service Bus messages, audit rows)?
+4. Detection: for each scenario, how an operator finds out today
+   (metric, log, alert, Temporal UI, or nothing).
+5. Resilience scorecard, one row per failure class (worker crash, timeout, rate limit,
+   provider outage, bad output, bad input, duplicate, poison message, bad release,
+   data loss); columns Detect / Contain / Recover / Prevent; each cell built, designed
+   or missing.
+6. The top 5 fixes ranked by risk removed per unit of effort, each naming the scenarios it fixes.
+
+Interview Q&A: the 5 hardest failure questions a CTO would ask about Helix, each answered
+in 4-6 sentences: what exists, what is missing, and what I would do.
 
 Write the result to helix-study/04-failure-recovery.md
 ```
+
+#### Before you read 04: a frame for failure questions
+
+Interviewers judge failure answers by their structure, not by how many tools you name. Answer every "what if X fails" question in this order:
+
+1. **Classify it.** Transient (a retry helps), permanent (a retry never helps), unknown outcome (did the side effect happen?), overload (too much work), or bad release (our own change).
+2. **Detect it.** Name the exact signal: a metric, an alert, a Temporal event, a gate count. "We would notice" is not an answer.
+3. **Contain it.** Limit the blast radius: timeouts at every layer, separate worker pools, concurrency limits, rate limiters, circuit breakers.
+4. **Recover by class.** Retry with backoff and jitter (transient); fail fast to a human (permanent); reconcile from a record (unknown outcome); queue and shed load (overload); roll back or quarantine (bad release).
+5. **Prevent it.** Tests, canary releases, evaluation gates, budgets.
+6. **Measure it.** End with the number you would watch to prove the fix works.
+
+**Survival kit for LLM agents in production.** Use these as your "better design" answers.
+
+| Risk | Mechanism |
+| --- | --- |
+| Rate limits (429) | Concurrency per provider sized to quota; a token-bucket limiter; honour Retry-After; backoff with jitter |
+| Provider outage | Circuit breaker per provider; fallback model chain; queue and resume instead of failing cases |
+| Slow or hung call | Layered timeouts: LLM call < activity start-to-close < step < case; heartbeats on long activities |
+| Bad output | Schema validation, one repair attempt, then a human gate; never pass unvalidated output downstream |
+| Silent model change | Pin model versions; run the evaluation set on every model or prompt change; alert on drift in gate rates |
+| Cost runaway | Retry budget per case (attempts × calls); a hard spend cap per case; cache responses by input hash so a retry or replay does not pay twice |
+| Poison input | Check size and page count at intake; reject early with a clear reason; never retry bad input |
+| Duplicate work | Deterministic IDs, idempotency keys, intent rows before side effects |
+| Bad release | Versioned activities, a canary on a small share of cases, quarantine and pin back |
+
+**One Temporal fact to remember:** when no retry policy is passed, Temporal retries an activity with no attempt limit, waiting 1 s and doubling up to 100 s between tries. So a raised bad-input error retries forever unless something sets a limit.
 
 ## Prompts 07 and 09: deployment, scale and operations
 
@@ -621,40 +736,51 @@ Write the result to helix-study/09-operations.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
+Agent anatomy, gate rules and thresholds are in helix-study/02-agents-layer.md
+(sections 4c and 8a); refer to them, do not repeat.
 
-Topic: The LLM and model layer - which agents use models, how they call them,
-how quality is measured.
+Topic: The LLM and model layer - which models each agent calls, with what prompts,
+how output is checked, and how quality is measured.
 
 Read:
-- agents/src/agents/registry.py (to find the 2 activities on core-agents-llm)
-- for those 2 agents, and for logo_agent (the planned first reasoning-loop agent):
-  the core/ files that build prompts or call models
-- any agent that reads AZURE_* or Document Intelligence settings
-  (search agents/src for AZURE_, openai, DocumentIntelligence)
+- agents/src/agents/activities/segmentation_agent/core/src/pipeline.py: only the LLM
+  mapping, LLM judge and embedding functions (search: gpt, judge, embed, prompt,
+  temperature, response_format)
+- agents/src/agents/activities/logo_agent/core/logo_agent.py L1-L60 and L330-L430
+- agents/src/agents/activities/ntdc_agent/core/NTDC_Agent/llm.py (full)
+- bisu_agent core: the Gemini / Vertex AI review call, and configs/thresholds.json
+- agents/src/agents/legacy_compat/ (how Azure settings reach core code)
 - broker_clients.py (llm_broker_call only)
 - docs/agents/UAIS_AGENT_MODEL_PORTING_GUIDE.md, docs/agents/2026-10-16-uais-connector-*
 - agents/notebooks/uais_model_connectivity_report.ipynb (markdown cells and result summary only)
+- services/libs/helix_platform_libs/src/helix_platform_libs/evaluation_framework/metrics.py
+  (function list and docstrings)
 - docs/spec/*annotated-pdf-metrics-backend-design*,
   docs/implementation/12-agent-metrics-hitl-gating-guideline.md
 - docs/adr/0007-*.md (full)
-If helix-study/02-agents-layer.md exists, reuse its gate-signal table instead of re-reading mappers.
 
 Answer:
-1. Which agents call an LLM or an Azure AI service, through what client, with what config?
-2. Table: agent, model or service, temperature, max tokens, structured output, retries.
-3. Where prompts live and how they are versioned (Registry prompt_versions?).
-   One real prompt, explained.
-4. Output parsing and validation; what happens on malformed output.
-5. UAIS: what it is, how agents reach models through it, what porting required,
-   what the connectivity report found.
-6. ADR 0007: why regulated translation stays human (MCS) - the risk reasoning.
-7. Quality: metrics, confidence thresholds that raise gates (start from
-   ntdc_agent/mappers.py:L66-L77), the annotated-PDF metrics backend, golden data.
-   How were thresholds chosen? Real numbers only.
-8. Guards against hallucination before a human sees the output.
-9. Where the LLM broker fits, and what happens to direct AZURE_* access once it exists.
-10. Why the LLM pool gets 64 threads and a lower KEDA threshold than the
-    deterministic pool: what the numbers say about LLM call latency.
+1. Table of every LLM or AI-service call site: agent, purpose (mapping, judge, vision,
+   review, embedding, OCR), provider and model, temperature, max tokens, timeout, retries,
+   structured output (yes/no), file and line.
+2. One real prompt per call type (segmentation mapping, segmentation judge, logo vision,
+   ntdc, bisu): what it asks and what format it expects back. Quote max 10 lines each.
+3. Where prompts live and how they are versioned: hard-coded, config files, prompt_text
+   overrides, Registry prompt_versions? Why are prompt_bindings ignored?
+4. Output parsing and validation per call site; what happens on malformed output,
+   refusals and empty responses.
+5. Credentials and endpoints: how core code gets keys and URLs today (legacy_compat,
+   config.json, env vars). What changes when calls go through UAIS or the LLM broker?
+6. UAIS: what it is, what porting required, what the connectivity report found.
+7. ADR 0007: why regulated translation stays human (MCS) - the risk reasoning.
+8. Quality measurement: what metrics.py computes, which numbers are real and which are
+   proxies, how the judge's strict_accuracy is produced, and how the thresholds in
+   02 section 8a were chosen (calibration data or a gold set? [NOT FOUND] if none).
+9. Hallucination and safety guards before a human sees the output.
+10. Cost and latency: LLM calls per document per agent, concurrency, timeouts vs the
+    contract activity timeouts (30 s / 120 s). Real numbers only.
+11. Why segmentation, which calls GPT-4.1 and Gemini, sits on the deterministic queue,
+    and what that does to KEDA scaling of both pools.
 
 Write the result to helix-study/13-llm-layer.md
 ```
