@@ -31,13 +31,13 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | # | Output file | Topic | Model and effort | Priority |
 | --- | --- | --- | --- | --- |
 | 00 | 00-big-picture.md | What Helix is, every service, one case end to end | — | Done |
-| 00T | 00t-temporal-primer.md | Temporal from zero, using Helix's real Temporal code | Sonnet, medium | Must, next |
-| 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Must |
-| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, contracts | Sonnet, high | Must |
+| 00T | 00t-temporal-primer.md | Temporal from zero, using Helix's real Temporal code | Sonnet, medium | Done |
+| 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Must, next |
+| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, contracts | Opus, medium | Must |
 | 04 | 04-failure-recovery.md | Failure scenarios in code and design | Opus, medium | Must |
-| 13 | 13-llm-layer.md | Models, prompts, UAIS, quality measurement | Sonnet, high | Must |
+| 13 | 13-llm-layer.md | Models, prompts, UAIS, quality measurement | Opus, medium | Must |
 | 07 | 07-deploy-scale.md | Helm, KEDA, cells, Azure services, load tests | Sonnet, medium | Must |
-| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, medium | Must |
+| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must |
 | 09 | 09-operations.md | Observability, audit, CI/CD, supply chain | Sonnet, medium | Should |
 | 10 | 10-security.md | Policy service, brokers, tokens, PHI | Sonnet, medium | Should |
 | 12 | 12-catalog-vendors.md | Registry, version pinning, vendor kit | Sonnet, medium | If time |
@@ -57,17 +57,17 @@ Agent mode shows every file change for you to keep or undo. Accept only changes 
 **Saving Copilot credits.** Copilot now bills by tokens, at a different rate per model, so both the model and the effort level change the cost.
 
 - Start a new Copilot chat for every prompt. A long chat resends its whole history on every turn.
-- Use Sonnet at medium effort by default. Use Opus only for 01, 04 and 16, where reasoning across docs and code matters.
+- Use Opus for the five files you must know cold: 01, 02, 04, 13 and 16. Use Sonnet for the rest; 00T showed it reads and summarises well at a much lower cost.
 - FACTS.md replaces rediscovery: each prompt lists exact files, so Copilot does not explore the repo.
-- Note your usage before and after 00T to learn what one prompt costs, then plan the rest.
-- When a section is unclear, ask in the Claude chat, not Copilot. That uses no Copilot credits.
+- Send each finished file to the Claude chat. I check it against FACTS.md and catch errors at no Copilot cost, so you rarely need the fact-check prompt.
+- When a section is unclear, ask in the Claude chat, not Copilot.
 
 ## STYLE.md — the rules every output follows
 
-Version 2, after the 00 run: it drops the separate evidence table, shortens the glossary and file list, and adds token rules that point to FACTS.md. Replace your `helix-study/STYLE.md` with this block. Every prompt points to it, so each prompt stays short and every output has the same shape.
+Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA\] notes in section 9 on how each weak point could be done better. I check those ideas and move the good ones into the TransQA Mini plan. Replace your `helix-study/STYLE.md` with this block.
 
 ```text
-# Writing rules for Helix study notes (v2 - lean)
+# Writing rules for Helix study notes (v2.1 - lean)
 
 ## Reader
 - Me: a senior AI/ML engineer preparing for interviews. English is my second language.
@@ -86,12 +86,16 @@ Version 2, after the 00 run: it drops the separate evidence table, shortens the 
 - Read only the files and line ranges a question needs. Never answer from file names.
 - Every new factual claim ends with evidence: path/to/file.py:L120-L145 or a doc path.
 - Tags: [CODE] seen in code or config; [DOCS-ONLY] only in docs, specs or ADRs;
-  [NOT FOUND] searched, absent; [CONCEPT] general knowledge, not about this repo.
+  [NOT FOUND] searched, absent; [CONCEPT] general knowledge, not about this repo;
+  [IDEA] your opinion on a better design - only in section 9, never mixed into facts.
 - Never invent numbers, names or settings. When docs and code disagree, show both.
+- Describe what Helix does as it is, even when it looks wrong. Put judgement in [IDEA].
 
 ## Token rules
 - No text before section 1. No closing summary.
 - Do not repeat content from other helix-study files; write "see 00 section 5".
+- Temporal concepts are explained in helix-study/00t-temporal-primer.md.
+  Do not re-explain them; write "see 00t part 7".
 - Code snippets: max 15 lines each, max 4 per file.
 - If an answer is [NOT FOUND], say so in one line and move on.
 
@@ -107,7 +111,8 @@ Version 2, after the 00 run: it drops the separate evidence table, shortens the 
 6. Diagram: one Mermaid diagram, max 12 boxes, plain labels.
 7. Code walkthrough: the most important snippets, important lines explained.
 8. Exact settings: table Setting | Value | File. New values only.
-9. Weak points and open gaps.
+9. Weak points and better options: each weak point in one line with evidence,
+   then one line starting [IDEA] on how it could be done better. Max 8.
 10. Interview Q&A: answer every question in the prompt, 3-6 sentences each,
     one file reference each. Then 2 CTO follow-ups for the whole file, with answers.
 11. Glossary: new terms only, max 12.
@@ -124,9 +129,10 @@ Version 2, after the 00 run: it drops the separate evidence table, shortens the 
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in 00-big-picture.md (repo read 2026-10-21)
+# Helix facts - verified in 00-big-picture.md and 00t-temporal-primer.md
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
+Temporal concepts are explained in helix-study/00t-temporal-primer.md.
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -139,31 +145,56 @@ Empty:        review_console_svc, connector_broker, llm_broker, agent_sandbox_ad
               services/tests/e2e
 NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no worker),
               code reading MCS_workflow_config_v1.json, .proto / gRPC, outbox poller,
-              Lane A consumer, Registry /triggers route, Cell Router /start route
+              Lane A consumer, Registry /triggers route, Cell Router /start route,
+              workflow patching, continue-as-new
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
 -> Registry GET /triggers/{wf} (404 -> dead-letter rejected_allowlist)  <- flow stops here
 -> Cell Router POST /start (missing) -> workflow_directory row
 -> start GenericOrchestratorWorkflow on orchestrator-platform (no worker)
-Cell Router bugs: NameError consumer/intake.py:L182-L183; TypeError and execute_workflow
-(blocks up to 30 days) store/temporal_client.py:L175-L183; Registry path /api/v1 mismatch.
+Cell Router bugs: NameError consumer/intake.py:L182-L183; Registry path /api/v1 mismatch;
+start call bugs - see "Cell Router start method" below.
 
 ## Where Temporal is used in code
-Start:   services/cell_router_svc/src/cell_router_svc/store/temporal_client.py:L67-L70, L175-L183
+Start:   services/cell_router_svc/src/cell_router_svc/store/temporal_client.py:L67-L70, L106-L200
          services/cell_router_svc/src/cell_router_svc/consumer/intake.py:L177-L187, L236-L268
 Signal:  services/trigger_gateway_svc/src/trigger_gateway_svc/dispatch/signal_dispatch.py:L42-L57
          services/trigger_gateway_svc/src/trigger_gateway_svc/store/workflow_client.py
          signal name trigger:<step> (services/libs/helix_trigger_lib/src/helix_trigger_lib/route.py:L32-L34)
-Worker:  agents/src/agents/worker.py:L20-L28, L71-L88; agents/src/agents/registry.py:L9-L49
+Worker:  agents/src/agents/worker.py:L1-L94; agents/src/agents/registry.py:L9-L49
 Wrapper: services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/
-         wrapper.py:L1-L16, L84-L136; envelope.py:L49-L113; broker_clients.py:L22-L115
+         wrapper.py:L1-L136; envelope.py:L49-L113; broker_clients.py:L22-L115
 Only runnable workflows (tests / perf):
          agents/tests/activity/_dummy_chain_probe_workflow.py:L9-L33
          agents/tests/activity/test_dummy_agents_worker_e2e.py:L16-L42
          agents/src/agents/perf/probe_workflow.py, agents/src/agents/perf/load_test.py:L50-L70
 Local:   services/docker-compose.yaml:L11-L42 (temporalio/auto-setup :7233, UI :8233)
 Scaling: infra/helm/agents-worker/values.yaml, templates/scaledobject.yaml
+
+## Temporal details
+Activity registration: @agent_activity -> temporalio.activity.defn(name=agent_id)
+  (wrapper.py:L36-L45, L136). Bad input -> failed_envelope "VALIDATION_ERROR" (L106);
+  core_fn runs with BrokerError uncaught, so Temporal retries it (L112).
+Heartbeat: only reasoning_loop agents call heartbeat({"iteration", "note"})
+  (wrapper.py:L55-L72); single-shot agents use a no-op (L49-L53). Wired when the
+  first loop agent (logo-agent) is ported.
+Worker: TEMPORAL_NAMESPACE default "default" (worker.py:L21); CORE_AGENTS_QUEUE_CLASS
+  all | deterministic | llm picks the queues (L33-L40); one Worker per queue via
+  asyncio.gather (L83-L86); production = one Deployment per class, "all" is for dev (L1-L6).
+  registry.py "dummy" profile registers only the two dummy agents (L15-L22).
+Test chain: DummyChainProbeWorkflow, id probe-dummy-chain-wf, queue core-agents-deterministic,
+  start_to_close 30 s per activity (_dummy_chain_probe_workflow.py:L16, L27) - the only
+  timeout in code; WorkflowEnvironment.start_local() (test_dummy_agents_worker_e2e.py:L18).
+Cell Router start method (temporal_client.py:L106-L200): named start_workflow but calls
+  execute_workflow (blocks up to the 30-day run timeout); TypeError from workflow= plus a
+  positional input; wrong keyword workflow_id_reuse_policy (Python SDK: id_reuse_policy);
+  comment L185-L186 wrongly says it returns a handle, so run_id at L187 would be empty.
+  Correct parts: REJECT_DUPLICATE default (L112, L163-L164), deterministic ID (L125-L130),
+  WorkflowAlreadyStartedError treated as success (L116-L120, L195-L197).
+Signal: Gateway raises NoLiveRun when the Directory row is missing or status != "open"
+  (signal_dispatch.py:L43-L49) -> dead-letter rejected_no_run; else it signals the run_id
+  stored in the row (L51-L57). A dehydrated case therefore fails closed.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
@@ -175,7 +206,19 @@ KEDA: metric temporal_activity_task_queue_backlog; deterministic min 1 max 40 th
 Designed retry (docs only, docs/AGENT_INVOCATION_UNIFIED_FLOW.md Phase 2): initial 1000 ms,
       backoff 2.0, max attempts 3, start-to-close 60000 ms, heartbeat 30000 ms
 MCS SLA: end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
-Designed scale: 1B+ runs/year; p95 < 2 s deterministic step, < 8 s AI step.
+Designed scale: 1B+ runs/year, ~32 starts/s average; p95 < 2 s deterministic step,
+      < 8 s AI step.
+
+## Design decisions already summarised (00t part 10)
+Spec 2.2: open runs, not start rate, size storage (Little's Law); Cassandra history plus a
+  visibility store; long-dwell gates dehydrate (spec 6.8); Continue-As-New does not reduce
+  open-run count. Spec 5.3 covers context building and determinism.
+ADR 0011: an agent is one activity; its loop is bounded by max_iterations with read-only
+  tools, so a crash restarts the whole loop safely; revisit with a child workflow if loops
+  threaten the 8 s p95.
+ADR 0019: workflow state holds only opaque case-scoped references plus non-PHI metadata;
+  agents redeem references at a broker in their own pod; cost = one extra broker call per
+  PHI field.
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
@@ -201,6 +244,20 @@ CI: identity-policy (3 workflows), trigger-gateway (2), trigger-intake (2).
 No CI for agents, registry, cell router. No CD.
 ```
 
+## Corrections to finished files
+
+Copilot's outputs are mostly accurate, but each has a few errors. Fix these in your files, or at least remember them before an interview.
+
+**00-big-picture.md**
+
+- Q1 says "10+ workflow runs per year". The spec figure is 1B+, as section 8 of the same file states.
+
+**00t-temporal-primer.md**
+
+- Part 8 is cut off mid-sentence, and its second half sits under a duplicate "## 9" heading. Rename the first "## 9" to "## 8 (continued)". The missing reference: the signal name `trigger:<step>` is built in `services/libs/helix_trigger_lib/src/helix_trigger_lib/route.py:L32-L34`.
+- Part 11, check 4 is wrong once the run has finished. Temporal's default reuse policy is ALLOW\_DUPLICATE, so starting `demo-1` again is rejected only while it is still running; after it completes, the same ID starts a new run. `REJECT_DUPLICATE`, which Helix sets, is what blocks that. This is a good interview point.
+- Part 6 hedges on the keyword. It is confirmed: the Python SDK keyword is `id_reuse_policy`, so `workflow_id_reuse_policy` is a third bug in the same Cell Router call.
+
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
 Run these first, in order. 00 is done, and its facts now live in FACTS.md.
@@ -209,9 +266,9 @@ Run these first, in order. 00 is done, and its facts now live in FACTS.md.
 
 Output: `helix-study/00-big-picture.md`. It found that the orchestrator workflow is designed but not built, and that today's request path stops at the Trigger Gateway. FACTS.md carries the details.
 
-### 00T — Temporal primer (next)
+### 00T — Temporal primer (done)
 
-Temporal is the engine under Helix's orchestration. Because the orchestrator is not built, this prompt teaches Temporal mostly from general knowledge and uses Helix's few real Temporal touchpoints as examples. That keeps it cheap: Sonnet at medium effort is enough.
+Output: `helix-study/00t-temporal-primer.md`, run on Sonnet. Its new facts are in FACTS.md and its errors are listed under Corrections. The prompt stays here for reference.
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
@@ -285,6 +342,7 @@ No orchestrator code exists, so the design lives in docs, and interviewers will 
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
+Temporal concepts are in helix-study/00t-temporal-primer.md; refer to them, do not re-explain.
 
 Topic: How Helix is designed to orchestrate one case - the Generic Orchestrator
 workflow and human gates - and how much of it exists.
@@ -292,31 +350,38 @@ workflow and human gates - and how much of it exists.
 Read:
 - docs/spec/*generic-orchestrator-workflow-design* (full)
 - docs/implementation/04-generic-orchestrator-implementation.md
+- docs/spec/2026-09-11-aks-temporal-distributed-architecture-design.md (sections 5.3 and 6.8 only)
 - docs/implementation/case-flow-walkthrough.md (orchestrator and gate steps only)
 - docs/spec/*hitl-human-in-the-loop-review-specification* and
   docs/spec/*gate-service-review-console-design* (state machine, SLA, decision flow only)
 - services/MCS_workflow_config_v1.json, vendor-kit/schemas/workflow-config.schema.json
 - services/orchestrator_svc/src/orchestrator_svc/migrations/versions/ (both files)
 - services/gate_svc/src/gate_svc/migrations/versions/ (both files)
-- docs/adr/ 0004, 0006, 0011, 0012, 0020, 0023 (Decision and Consequences only)
-Skip ingress services (covered in 00) and agent internals (covered in 02).
+- docs/adr/ 0004, 0006, 0012, 0020, 0023 (Decision and Consequences only)
+Skip ingress (covered in 00), Temporal basics (00t) and agent internals (02).
 
 Answer:
 1. The designed GenericOrchestratorWorkflow, step by step: PinVersions, BuildContext,
-   the step loop, gates, completion. Write it as pseudo-code, 25 lines max, [DOCS-ONLY].
-2. Walk MCS_workflow_config_v1.json field by field against workflow-config.schema.json.
-   Which fields would drive execution?
-3. Step order: sequence only, or parallel and conditional through input_bindings?
-4. effect_ledger: what it is for, its columns, and how the design uses it
-   (exactly-once side effects?).
-5. cases status machine: states, allowed transitions, how the DB trigger enforces them.
-6. Gates: when one is raised (needs_gate; gate_type confidence / policy / exception).
-   How does the workflow wait: timer plus signal, or dehydrate and restart?
-   What happens on SLA expiry and escalation (ADR 0023)?
-7. Who decides, how the decision is stored (gates, decisions tables), how the case resumes.
-8. ADR 0004 "agent means case-processing workflow agent": what does it rule out, and why?
-9. Why one generic workflow instead of one per use case? What does it cost?
-10. The smallest set of code needed to run one MCS case end to end, in build order.
+   the step loop, gates, completion. Write it as Python-style pseudo-code with real
+   Temporal calls (execute_activity, wait_condition, signal handlers), 30 lines max,
+   tagged [DOCS-ONLY].
+2. Spec 5.3: how context is built and kept deterministic. What is read inside an
+   activity, and what is held in workflow state?
+3. Walk MCS_workflow_config_v1.json field by field against workflow-config.schema.json.
+   Which fields drive execution, and which map to activity options
+   (task queue, timeouts, retry policy)?
+4. Step order: sequence only, or parallel and conditional through input_bindings?
+5. effect_ledger: purpose, columns, and how it gives exactly-once side effects on retry.
+6. cases status machine: states, allowed transitions, how the DB trigger enforces them.
+7. Gates: when one is raised (needs_gate; gate_type confidence / policy / exception).
+   Short wait (timer plus signal) vs long wait (dehydrate, spec 6.8): what decides,
+   what is saved, how a fresh run rehydrates, and how the Gateway's NoLiveRun rule
+   fits. What happens on SLA expiry and escalation (ADR 0023)?
+8. Who decides, how the decision is stored (gates, decisions tables), how the case resumes.
+9. ADR 0004 and ADR 0006 in plain words: what they rule out, and why.
+10. Why one generic workflow instead of one per use case? What does it cost
+    (versioning, testing, debugging)?
+11. The smallest set of code needed to run one MCS case end to end, in build order.
 
 Write the result to helix-study/01-orchestration.md
 ```
@@ -333,11 +398,13 @@ and how data passes between them.
 
 Read:
 - agents/src/agents/activities/segmentation_agent/ (all files) - the worked example
-- every other agent: activity.py and contract/ only (core/ only if a question needs it)
+- agents/src/agents/activities/logo_agent/activity.py and core/ (the planned first loop agent)
+- every other agent: activity.py and contract/ only
 - agents/src/agents/io_models/base.py, agents/linguistic-agent-contract.json
 - agents/src/agents/legacy_compat/ (first 60 lines of each file)
-- services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/ (all files)
-- agents/tests/contract/ (file names, plus one test in full)
+- services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/ (all files;
+  skip the wrapper.py parts already summarised in FACTS.md)
+- agents/tests/contract/ (file names, plus one test in full); agents/tests/unit/ (file names only)
 - docs/agents/AGENT_LAYER.md, docs/adr/0012-*.md (Decision only)
 - docs/reviews/2026-10-06-core-agents-temporal-framework-review.md (findings list)
 
@@ -345,21 +412,23 @@ Answer:
 1. Each part of segmentation_agent (activity.py, core/, data_model/, mappers.py,
    contract/, payload_template.json), and why an agent is split this way.
 2. Trace segmentation_agent's payload_template.json from input to output envelope,
-   with real field names.
-3. What @agent_activity does, line by line: validation, envelope, errors, metrics, audit.
+   with real field names and one realistic value per field.
+3. The wrapper beyond FACTS.md: input model validation, how sla, confidence and
+   audit_entry are filled, metrics, the rounding helpers, and the reasoning_loop mode.
 4. Table of all 10 agents: queue (deterministic or llm), purpose in one line, input,
-   output, LLM used (yes/no), external service called, in the MCS config (yes/no).
-   Explain names like bisu and ntdc only if the code explains them.
-5. linguistic-agent-contract.json and io_models/base.py field by field.
+   output, LLM used (yes/no), external service called, in the MCS config (yes/no),
+   single-shot or reasoning loop. Explain names like bisu and ntdc only if the code does.
+5. logo_agent: is it ported? What would its loop look like (max_iterations, tools)?
+6. linguistic-agent-contract.json and io_models/base.py field by field.
    Who must follow them?
-6. Handoff: what one agent returns and what the next receives - values, paths or
+7. Handoff: what one agent returns and what the next receives - values, paths or
    references? How would input_bindings map to the payload? What is missing
    because no orchestrator exists?
-7. Contract versioning and validation: where checked, what happens on a mismatch.
-8. Artifacts: produces_artifacts and the write_non_phi_blob passthrough - where do
+8. Contract versioning and validation: where checked, what happens on a mismatch.
+9. Artifacts: produces_artifacts and the write_non_phi_blob passthrough - where do
    files really go today?
-9. What do the contract tests check, and what would they miss?
-10. Review findings: which are still open in code today?
+10. Tests: what the contract and unit tests check, and what they would miss.
+11. Review findings: which are still open in code today?
 
 Write the result to helix-study/02-agents-layer.md
 ```
@@ -372,17 +441,18 @@ Senior panels spend the most time here. The scenarios now match what exists: the
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
+Temporal failure concepts and the return-vs-raise trade-off are in
+helix-study/00t-temporal-primer.md part 7; refer to them, do not repeat.
 
 Topic: What happens when things fail in Helix - in the code that exists, and in the design.
 
 Read:
-- services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/
-  wrapper.py, envelope.py, broker_clients.py
-- agents/src/agents/worker.py
+- services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/broker_clients.py
 - services/trigger_gateway_svc/src/trigger_gateway_svc/consumer/servicebus_consumer.py,
+  services/trigger_gateway_svc/src/trigger_gateway_svc/main.py (receive loop and error backoff),
   services/libs/helix_trigger_lib/src/helix_trigger_lib/normalize.py
-- services/cell_router_svc/src/cell_router_svc/consumer/intake.py, store/temporal_client.py,
-  and the sweep code (search cell_router_svc for "sweep")
+- services/cell_router_svc/src/cell_router_svc/consumer/intake.py, and the sweep code
+  (search cell_router_svc for "sweep")
 - services/trigger_intake_svc/src/trigger_intake_svc/dedup/idempotency_store.py
 - vendor-kit/schemas/error-taxonomy.json
 - docs/AGENT_INVOCATION_UNIFIED_FLOW.md (Phase 2 retry section only)
@@ -390,25 +460,30 @@ Read:
 
 For each scenario: what happens step by step, the final state, each step tagged
 [CODE] or [DOCS-ONLY].
-A. An LLM call times out inside an agent.
-B. An agent raises an unexpected exception.
+A. An LLM or Document Intelligence call times out inside an agent.
+B. An agent raises an unexpected exception (not BrokerError).
 C. An agent returns a failed envelope.
-D. The agents worker pod is killed mid-activity (30 s graceful shutdown, then what?).
+D. The agents worker pod is killed mid-activity. With no heartbeat on single-shot
+   agents, when does Temporal notice, and what runs again?
 E. Cell Router crashes after writing the workflow_directory row, before the Temporal
-   start. What does the sweep do?
+   start. What does the sweep do (grace 5 min, interval 10 min, batch 100)?
 F. Temporal is down when Cell Router tries to start a workflow.
-G. The same upload is sent twice, with and without an Idempotency-Key header.
-H. A poison message (MissingCaseId) reaches the Trigger Gateway.
+G. The same upload is sent twice: with and without an Idempotency-Key header,
+   and across two Intake replicas (in-memory stores).
+H. A poison message (MissingCaseId) reaches the Trigger Gateway: redelivery and dead-letter.
 I. A bad agent version is released (ADR 0022 recall and quarantine).
 J. A reviewer never acts on a gate (ADR 0023).
+K. A broker returns 4xx (permanent) vs 5xx (transient): does broker_clients.py
+   tell them apart, or does every error retry?
 
 Then answer:
 1. error-taxonomy.json: categories, retryable or not, where code uses it
    ([NOT FOUND] if unused).
-2. Returned failures vs raised errors: what Temporal retries and what it never retries.
-   Is this a good design? Give the trade-off.
-3. Designed retry policy vs what code sets today. Where would it be set?
-4. Failures not handled today: one line each.
+2. Designed retry policy vs what code sets today. Where should it be set
+   (workflow config, orchestrator, or activity options)?
+3. Exactly-once: which side effects could run twice today, and what the
+   effect_ledger design would change.
+4. Failures not handled today: one line each, ranked by risk.
 
 Write the result to helix-study/04-failure-recovery.md
 ```
@@ -439,7 +514,7 @@ Answer:
 1. Deployable units table: image, base image, port, Helm chart (or none).
 2. agents-worker chart walk-through: deployment.yaml (resources, probes, env, secrets,
    service account and workload identity), scaledobject.yaml (scaler type, query,
-   thresholds), and how one chart deploys two pools.
+   thresholds), and how one chart deploys two pools via CORE_AGENTS_QUEUE_CLASS.
 3. values-dev, staging, prod and dummy: what differs. Table.
 4. How Temporal is hosted: local (compose), dev cluster (temporal-frontend.dev...), and
    the design (one cluster per cell, its database). What is decided vs open.
@@ -449,7 +524,7 @@ Answer:
 7. Azure services table: service, purpose, built or designed.
 8. Load test: what it sends, what it measures, committed results ([NOT FOUND] if none).
 9. The designed bottleneck: LLM rate limits, threads, Temporal or brokers? Use the
-   designed SLOs and the KEDA thresholds in FACTS.md.
+   designed SLOs, thread pool sizes and KEDA thresholds in FACTS.md.
 10. With no CD workflow, how would a change reach AKS today? [NOT FOUND] if undocumented.
 
 Write the result to helix-study/07-deploy-scale.md
@@ -477,18 +552,20 @@ Answer:
 1. Logs: library, format, fields. Is case_id or workflow_id on every line?
 2. Metrics: every metric defined in code (name, type, labels, file).
    Are Temporal SDK metrics enabled?
-3. Tracing: OpenTelemetry or Temporal interceptors anywhere? [NOT FOUND] if none.
-4. The Fluent Bit vendor-agent filter: what it does and why.
-5. Audit design: audit_log, outbox, poller, Event Hub, index. What is built?
+3. Temporal counts a returned failed envelope as a successful activity. Does any
+   metric, log or audit entry record the envelope status? [NOT FOUND] if none.
+4. Tracing: OpenTelemetry or Temporal interceptors anywhere? [NOT FOUND] if none.
+5. The Fluent Bit vendor-agent filter: what it does and why.
+6. Audit design: audit_log, outbox, poller, Event Hub, index. What is built?
    Why an outbox? Explain the dual-write problem simply.
-6. Arize: what the design sends, how PHI is kept out, built or not.
-7. Debug walkthrough: "case X produced a wrong annotation" - what you can use today,
+7. Arize: what the design sends, how PHI is kept out, built or not.
+8. Debug walkthrough: "case X produced a wrong annotation" - what you can use today,
    and what the design adds.
-8. Each GitHub workflow in one table: trigger and paths, jobs, what is tested,
+9. Each GitHub workflow in one table: trigger and paths, jobs, what is tested,
    image registry, tag, auth (OIDC or secret).
-9. The setup-opa action and the three identity-policy workflows as one policy pipeline.
-10. Supply-chain gate and SBOM: designed vs built. What stops a bad change today?
-11. Status table: logging, metrics, tracing, dashboards, alerts, LLM observability,
+10. The setup-opa action and the three identity-policy workflows as one policy pipeline.
+11. Supply-chain gate and SBOM: designed vs built. What stops a bad change today?
+12. Status table: logging, metrics, tracing, dashboards, alerts, LLM observability,
     audit, CI, CD - [CODE] / [DOCS-ONLY] / [NOT FOUND].
 
 Write the result to helix-study/09-operations.md
@@ -508,7 +585,8 @@ how quality is measured.
 
 Read:
 - agents/src/agents/registry.py (to find the 2 activities on core-agents-llm)
-- for those 2 agents: the core/ files that build prompts or call models
+- for those 2 agents, and for logo_agent (the planned first reasoning-loop agent):
+  the core/ files that build prompts or call models
 - any agent that reads AZURE_* or Document Intelligence settings
   (search agents/src for AZURE_, openai, DocumentIntelligence)
 - broker_clients.py (llm_broker_call only)
@@ -531,6 +609,8 @@ Answer:
    golden data. Real numbers only.
 8. Guards against hallucination before a human sees the output.
 9. Where the LLM broker fits, and what happens to direct AZURE_* access once it exists.
+10. Why the LLM pool gets 64 threads and a lower KEDA threshold than the
+    deterministic pool: what the numbers say about LLM call latency.
 
 Write the result to helix-study/13-llm-layer.md
 ```
@@ -620,7 +700,8 @@ Read:
 - docs/reviews/2026-10-06-core-agents-temporal-framework-review.md (findings and verdict)
 - docs/implementation/pending-decisions.md
 - docs/future_spec/ (file names and first paragraph only)
-Reuse helix-study/00-big-picture.md section 11, Q7 table, for decisions it already compares.
+Reuse helix-study/00-big-picture.md section 11 (Q7 table) and
+helix-study/00t-temporal-primer.md part 10 (ADR 0011, 0019) instead of re-reading them.
 
 Answer:
 1. Table of all 33 ADRs: number, decision in one plain line, problem solved,
@@ -641,7 +722,8 @@ Write the result to helix-study/15-tradeoffs.md
 ```text
 Follow the Language and Truth rules in #file:helix-study/STYLE.md.
 Known facts: #file:helix-study/FACTS.md.
-Read sections 1, 4, 9 and 10 of every numbered file in helix-study/. Nothing else.
+Read sections 1, 4, 9 and 10 of every numbered file in helix-study/, and only the
+interview questions of 00t-temporal-primer.md. Nothing else.
 
 Write:
 1. 30-second pitch: what Helix is, why it is built this way, and its honest status
