@@ -32,8 +32,8 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | --- | --- | --- | --- | --- |
 | 00 | 00-big-picture.md | What Helix is, every service, one case end to end | — | Done |
 | 00T | 00t-temporal-primer.md | Temporal from zero, using Helix's real Temporal code | Sonnet, medium | Done |
-| 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Must, next |
-| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, contracts | Opus, medium | Must |
+| 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Done |
+| 02 | 02-agents-layer.md | Inside an agent, registration, handoff, gate signals | Opus, medium | Must, next |
 | 04 | 04-failure-recovery.md | Failure scenarios in code and design | Opus, medium | Must |
 | 13 | 13-llm-layer.md | Models, prompts, UAIS, quality measurement | Opus, medium | Must |
 | 07 | 07-deploy-scale.md | Helm, KEDA, cells, Azure services, load tests | Sonnet, medium | Must |
@@ -129,10 +129,11 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in 00-big-picture.md and 00t-temporal-primer.md
+# Helix facts - verified in 00-big-picture.md, 00t-temporal-primer.md, 01-orchestration.md
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
-Temporal concepts are explained in helix-study/00t-temporal-primer.md.
+Temporal concepts: helix-study/00t-temporal-primer.md. Orchestrator and gate design:
+helix-study/01-orchestration.md.
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -146,7 +147,7 @@ Empty:        review_console_svc, connector_broker, llm_broker, agent_sandbox_ad
 NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no worker),
               code reading MCS_workflow_config_v1.json, .proto / gRPC, outbox poller,
               Lane A consumer, Registry /triggers route, Cell Router /start route,
-              workflow patching, continue-as-new
+              workflow patching, continue-as-new, Gate Service API, sweeper
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -194,7 +195,42 @@ Cell Router start method (temporal_client.py:L106-L200): named start_workflow bu
   WorkflowAlreadyStartedError treated as success (L116-L120, L195-L197).
 Signal: Gateway raises NoLiveRun when the Directory row is missing or status != "open"
   (signal_dispatch.py:L43-L49) -> dead-letter rejected_no_run; else it signals the run_id
-  stored in the row (L51-L57). A dehydrated case therefore fails closed.
+  stored in the row (L51-L57). Directory status: open | dehydrated | closed
+  (cell_router_svc workflow_directory.py:L36).
+
+## Orchestrator and gates design (01)
+Design: GenericOrchestratorWorkflow walks a recipe tree (execute_node): step, sequential,
+  parallel (join all only), loop_until (on_exhausted gate | fail), subflow (inline,
+  depth <= 5). No if/else node. Spec: docs/spec/2026-09-16-generic-orchestrator-workflow-
+  design.md; sketch: docs/implementation/04-generic-orchestrator-implementation.md L131-L232.
+Designed activities: PinVersions, LoadWorkflowConfig, BuildContext, CheckEffectLedger,
+  RecordEffect, WriteAudit, WriteSla, WriteOutcome, RaiseGate, Dehydrate. None built.
+Registry POST /resolve-pins is built: flat list pins[{entity_type, entity_id, version}]
+  (registry_svc resolve_pins.py:L24-L58); the 04 sketch expects a dict.
+Config: MCS_workflow_config_v1.json fails workflow-config.schema.json (missing tenant_id,
+  recipe); no additionalProperties:false; no field for task queue, timeouts or retry.
+  MCS min/max/escalation_sla_hours and auto_approve_gate are defined nowhere.
+cases: 7 statuses; trigger case_transition_guard BEFORE UPDATE OF status:
+  created->in_progress; in_progress->awaiting_review|completed|rejected|failed|cancelled;
+  awaiting_review->in_progress|failed|cancelled; terminal states frozen; a same-state
+  update raises; INSERT unguarded. Columns include pinned_versions, dehydrated (bool),
+  dehydration_state, SLA clocks; RLS on tenant_id; no column for step outputs.
+effect_ledger: PK (workflow_id, step_id, loop_iteration, logical_effect_id), outcome JSONB,
+  effected_at; no "started" marker. No MCS step is side_effecting.
+gates: gate_type confidence | policy | exception (HITL spec lists 5); status
+  open | resolved | escalated | terminal; terminal_disposition failed | park; resolution_type
+  approve | override | correction | reject | escalate | timeout; index WHERE status='open'.
+  decisions: PK gate_id, no PHI.
+Code shapes: GateSignal {rule_id, severity, evidence} (io_models/base.py:L25-L30);
+  CaseContext {current_state, prior_step_outcomes, blob_pointers} (base.py:L47-L60).
+  Confidence thresholds live in agent mappers (ntdc_agent/mappers.py:L66-L77); validation
+  gate signals flow into annotate's input (validation_agent/mappers.py:L95-L131,
+  annotation_agent/mappers.py:L24); annotate reads artifact paths from disk (L35).
+Gate design: dehydrate when expected dwell > ~1 h (provisional, arch 6.8); saved state
+  {pinned_versions, last_context_snapshot_ref, resume_at_step_id}; sweeper CronJob ~60 s;
+  gate token EdDSA JWT, 2 h in-run / 24 h dehydrated; single-winner
+  UPDATE ... WHERE status='open'; reviewer holds required_role and is not the submitter.
+Spec says agent status ok | needs_gate | failed; code says success | needs_gate | failed.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
@@ -207,18 +243,11 @@ Designed retry (docs only, docs/AGENT_INVOCATION_UNIFIED_FLOW.md Phase 2): initi
       backoff 2.0, max attempts 3, start-to-close 60000 ms, heartbeat 30000 ms
 MCS SLA: end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
 Designed scale: 1B+ runs/year, ~32 starts/s average; p95 < 2 s deterministic step,
-      < 8 s AI step.
+      < 8 s AI step. Orchestrator pool: D4s_v5, 1-5 nodes, 3 workers (04 doc).
 
-## Design decisions already summarised (00t part 10)
-Spec 2.2: open runs, not start rate, size storage (Little's Law); Cassandra history plus a
-  visibility store; long-dwell gates dehydrate (spec 6.8); Continue-As-New does not reduce
-  open-run count. Spec 5.3 covers context building and determinism.
-ADR 0011: an agent is one activity; its loop is bounded by max_iterations with read-only
-  tools, so a crash restarts the whole loop safely; revisit with a child workflow if loops
-  threaten the 8 s p95.
-ADR 0019: workflow state holds only opaque case-scoped references plus non-PHI metadata;
-  agents redeem references at a broker in their own pod; cost = one extra broker call per
-  PHI field.
+## Design decisions already summarised
+00t part 10: spec 2.2 (Little's Law, Cassandra, dehydrate), ADR 0011, ADR 0019.
+01 sections 7.9 and 9: ADR 0004, 0006, 0012, 0020, 0023.
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
@@ -257,6 +286,13 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 - Part 8 is cut off mid-sentence, and its second half sits under a duplicate "## 9" heading. Rename the first "## 9" to "## 8 (continued)". The missing reference: the signal name `trigger:<step>` is built in `services/libs/helix_trigger_lib/src/helix_trigger_lib/route.py:L32-L34`.
 - Part 11, check 4 is wrong once the run has finished. Temporal's default reuse policy is ALLOW\_DUPLICATE, so starting `demo-1` again is rejected only while it is still running; after it completes, the same ID starts a new run. `REJECT_DUPLICATE`, which Helix sets, is what blocks that. This is a good interview point.
 - Part 6 hedges on the keyword. It is confirmed: the Python SDK keyword is `id_reuse_policy`, so `workflow_id_reuse_policy` is a third bug in the same Cell Router call.
+
+**01-orchestration.md**
+
+- Several long lines end mid-sentence (sections 5 and 7.1–7.7). If they are cut in the file too, not only in your copy, ask Copilot in the same chat: "In 01-orchestration.md, complete the lines that end mid-sentence in sections 5 and 7." That is a cheap request.
+- Section 8 says history shards are "fixed at namespace creation". In Temporal the shard count is fixed when the cluster is created and covers every namespace in it. Say "cluster" in interviews.
+- Section 7.1 calls an `EscalateGate` activity. That name is Copilot's; the docs' activity list does not include it.
+- One gap the file missed: the trigger rejects a same-state update, and activities retry. If `WriteOutcome` commits and its worker dies before reporting back, the retry writes the same status again and fails. Good to raise in an interview; the fix is in the TransQA Mini lessons.
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -394,19 +430,21 @@ The agents worker is the most complete code in Helix, so this is where you can s
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
 
 Topic: The agents layer - inside one agent, how agents are registered and run,
-and how data passes between them.
+what gate signals they raise, and how data passes between them.
 
 Read:
 - agents/src/agents/activities/segmentation_agent/ (all files) - the worked example
 - agents/src/agents/activities/logo_agent/activity.py and core/ (the planned first loop agent)
+- mappers.py of validation_agent, ntdc_agent and annotation_agent (gate signals, thresholds)
 - every other agent: activity.py and contract/ only
 - agents/src/agents/io_models/base.py, agents/linguistic-agent-contract.json
 - agents/src/agents/legacy_compat/ (first 60 lines of each file)
 - services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/ (all files;
   skip the wrapper.py parts already summarised in FACTS.md)
 - agents/tests/contract/ (file names, plus one test in full); agents/tests/unit/ (file names only)
-- docs/agents/AGENT_LAYER.md, docs/adr/0012-*.md (Decision only)
+- docs/agents/AGENT_LAYER.md
 - docs/reviews/2026-10-06-core-agents-temporal-framework-review.md (findings list)
+Skip orchestrator and gate design (covered in 01).
 
 Answer:
 1. Each part of segmentation_agent (activity.py, core/, data_model/, mappers.py,
@@ -417,18 +455,20 @@ Answer:
    audit_entry are filled, metrics, the rounding helpers, and the reasoning_loop mode.
 4. Table of all 10 agents: queue (deterministic or llm), purpose in one line, input,
    output, LLM used (yes/no), external service called, in the MCS config (yes/no),
-   single-shot or reasoning loop. Explain names like bisu and ntdc only if the code does.
-5. logo_agent: is it ported? What would its loop look like (max_iterations, tools)?
-6. linguistic-agent-contract.json and io_models/base.py field by field.
-   Who must follow them?
-7. Handoff: what one agent returns and what the next receives - values, paths or
-   references? How would input_bindings map to the payload? What is missing
-   because no orchestrator exists?
-8. Contract versioning and validation: where checked, what happens on a mismatch.
-9. Artifacts: produces_artifacts and the write_non_phi_blob passthrough - where do
-   files really go today?
-10. Tests: what the contract and unit tests check, and what they would miss.
-11. Review findings: which are still open in code today?
+   single-shot or reasoning loop, gate rules it can emit.
+   Explain names like bisu and ntdc only if the code does.
+5. Gate signals: every rule_id the agents can emit, its severity, the threshold that
+   triggers it, and the file and line. How do validation sub-agents' signals reach annotate?
+6. logo_agent: is it ported? What would its loop look like (max_iterations, tools)?
+7. linguistic-agent-contract.json and io_models/base.py field by field, including
+   CaseContext and GateSignal. Who must follow them?
+8. Handoff today: agents pass file paths, and annotate reads paths from disk. What breaks
+   when consecutive steps run in pods on different nodes? How would references fix it?
+9. Contract versioning and validation: where checked, what happens on a mismatch.
+10. Artifacts: produces_artifacts and the write_non_phi_blob passthrough - where do
+    files really go today?
+11. Tests: what the contract and unit tests check, and what they would miss.
+12. Review findings: which are still open in code today?
 
 Write the result to helix-study/02-agents-layer.md
 ```
@@ -442,7 +482,9 @@ Senior panels spend the most time here. The scenarios now match what exists: the
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
 Temporal failure concepts and the return-vs-raise trade-off are in
-helix-study/00t-temporal-primer.md part 7; refer to them, do not repeat.
+helix-study/00t-temporal-primer.md part 7. Orchestrator-design failures (ledger gap,
+rehydration ID policy, trigger conflicts, sweeper index) are in 01 section 9.
+Refer to both; do not repeat them.
 
 Topic: What happens when things fail in Helix - in the code that exists, and in the design.
 
@@ -456,7 +498,7 @@ Read:
 - services/trigger_intake_svc/src/trigger_intake_svc/dedup/idempotency_store.py
 - vendor-kit/schemas/error-taxonomy.json
 - docs/AGENT_INVOCATION_UNIFIED_FLOW.md (Phase 2 retry section only)
-- docs/adr/ 0022, 0023, 0029 (Decision only)
+- docs/adr/ 0022 and 0029 (Decision only)
 
 For each scenario: what happens step by step, the final state, each step tagged
 [CODE] or [DOCS-ONLY].
@@ -472,17 +514,17 @@ G. The same upload is sent twice: with and without an Idempotency-Key header,
    and across two Intake replicas (in-memory stores).
 H. A poison message (MissingCaseId) reaches the Trigger Gateway: redelivery and dead-letter.
 I. A bad agent version is released (ADR 0022 recall and quarantine).
-J. A reviewer never acts on a gate (ADR 0023).
+J. WriteOutcome commits, then its worker dies before reporting back. The retry writes
+   the same status, and the cases trigger rejects same-state updates. What happens?
 K. A broker returns 4xx (permanent) vs 5xx (transient): does broker_clients.py
    tell them apart, or does every error retry?
 
 Then answer:
 1. error-taxonomy.json: categories, retryable or not, where code uses it
    ([NOT FOUND] if unused).
-2. Designed retry policy vs what code sets today. Where should it be set
-   (workflow config, orchestrator, or activity options)?
-3. Exactly-once: which side effects could run twice today, and what the
-   effect_ledger design would change.
+2. Designed retry policy vs what code sets today. Where should it be set,
+   given the workflow config schema has no field for it?
+3. Exactly-once in the code that exists: which side effects could run twice today?
 4. Failures not handled today: one line each, ranked by risk.
 
 Write the result to helix-study/04-failure-recovery.md
@@ -595,6 +637,7 @@ Read:
 - docs/spec/*annotated-pdf-metrics-backend-design*,
   docs/implementation/12-agent-metrics-hitl-gating-guideline.md
 - docs/adr/0007-*.md (full)
+If helix-study/02-agents-layer.md exists, reuse its gate-signal table instead of re-reading mappers.
 
 Answer:
 1. Which agents call an LLM or an Azure AI service, through what client, with what config?
@@ -605,8 +648,9 @@ Answer:
 5. UAIS: what it is, how agents reach models through it, what porting required,
    what the connectivity report found.
 6. ADR 0007: why regulated translation stays human (MCS) - the risk reasoning.
-7. Quality: metrics, thresholds that raise gates, the annotated-PDF metrics backend,
-   golden data. Real numbers only.
+7. Quality: metrics, confidence thresholds that raise gates (start from
+   ntdc_agent/mappers.py:L66-L77), the annotated-PDF metrics backend, golden data.
+   How were thresholds chosen? Real numbers only.
 8. Guards against hallucination before a human sees the output.
 9. Where the LLM broker fits, and what happens to direct AZURE_* access once it exists.
 10. Why the LLM pool gets 64 threads and a lower KEDA threshold than the
@@ -700,8 +744,9 @@ Read:
 - docs/reviews/2026-10-06-core-agents-temporal-framework-review.md (findings and verdict)
 - docs/implementation/pending-decisions.md
 - docs/future_spec/ (file names and first paragraph only)
-Reuse helix-study/00-big-picture.md section 11 (Q7 table) and
-helix-study/00t-temporal-primer.md part 10 (ADR 0011, 0019) instead of re-reading them.
+Reuse instead of re-reading: helix-study/00-big-picture.md section 11 (Q7 table),
+00t-temporal-primer.md part 10 (ADR 0011, 0019), 01-orchestration.md sections 7.9 and 9
+(ADR 0004, 0006, 0012, 0020, 0023).
 
 Answer:
 1. Table of all 33 ADRs: number, decision in one plain line, problem solved,
