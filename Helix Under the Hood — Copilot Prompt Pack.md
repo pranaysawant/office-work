@@ -35,11 +35,11 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 01 | 01-orchestration.md | Orchestrator and human gates: design vs built | Opus, high | Done |
 | 02 | 02-agents-layer.md | Inside an agent, registration, handoff, gate signals | Opus, medium | Done |
 | 04 | 04-failure-recovery.md | How agents survive real failures: verdicts, gaps, fixes | Opus, high | Done |
-| 13 | 13-llm-layer.md | Prompts, models, credentials, evaluation, cost | Opus, medium | Must, next |
-| 07 | 07-deploy-scale.md | Helm, KEDA, capacity vs provider quota, cells, Azure | Sonnet, medium | Must |
+| 13 | 13-llm-layer.md | Prompts, models, credentials, evaluation, cost | Opus, medium | Done |
+| 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Must, next |
 | 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must |
 | 09 | 09-operations.md | Designed observability, audit, alerts, CI/CD | Sonnet, medium | Should |
-| 10 | 10-security.md | Policy service, brokers, tokens, PHI, secrets | Sonnet, medium | Should |
+| 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers | Sonnet, medium | Should |
 | 12 | 12-catalog-vendors.md | Registry, version pinning, vendor kit | Sonnet, medium | If time |
 | 16 | 16-cheat-sheet.md | Pitch, hardest questions, do-not-claim list | Opus, medium | Must, last |
 
@@ -129,12 +129,13 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in the 00, 00t, 01, 02 and 04 study files
+# Helix facts - verified in the 00, 00t, 01, 02, 04 and 13 study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
 Temporal concepts: helix-study/00t-temporal-primer.md. Orchestrator and gate design:
 helix-study/01-orchestration.md. Agents, gate rules, thresholds: helix-study/02-agents-layer.md.
 Failure scenarios, retry budget, scorecard: helix-study/04-failure-recovery.md.
+Models, prompts, credentials, evaluation plan: helix-study/13-llm-layer.md.
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -150,7 +151,8 @@ NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no work
               Lane A consumer, Registry /triggers route, Cell Router /start route,
               workflow patching, continue-as-new, Gate Service API, sweeper,
               runtime telemetry (Prometheus / OTel) in agents and the wrapper,
-              alert rules anywhere, a RetryPolicy passed anywhere
+              alert rules anywhere, a RetryPolicy passed anywhere, a gold set,
+              PHI redaction before model calls
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -252,13 +254,6 @@ Agents: deterministic queue - dummy1, dummy2, detect-lang, segmentation (calls G
   translation-review runs segmentation, the validation children and annotate in ONE activity.
   NTDC = Numbers, Dates, Times, Currencies; BISU (not expanded in code) = bold, italic,
   underline, font size.
-LLMs (called directly, not through brokers): segmentation GPT-4.1 mapping + GPT-4.1 judge +
-  Gemini embeddings + Azure DI; logo gpt-4o (fallback gpt-4.1, o4-mini, 240 s call timeout);
-  ntdc GPT-4.1 optional (use_llm default true); bisu Gemini on Vertex AI (thresholds.json
-  llm_review.enabled true; step_config.use_llm ignored). Segmentation core: LLM_TIMEOUT 120,
-  LLM_MAPPING_MAX_CONCURRENCY 6, MAX_PAGES 20. core/config.json holds developer paths and a key-file path.
-logo: contract says harness_loop, max_iterations 3, exit at 0.85; core is one linear pass
-  with a model fallback list.
 Handoff: local file paths. Artifacts in /tmp/helix-artifacts/<case>/downstream_artifacts/<agent>
   (artifacts.py:L81-L83); segmentation uses SEGMENTATION_ARTIFACTS_ROOT. No shared volume in
   the Helm chart. Segmentation returns mapped_regions and the run_summary mapping list by value,
@@ -268,8 +263,7 @@ Contract activity_options are data only (nothing reads them): 30 s for determini
 Versions: contract_version 1.0.0 everywhere, never compared; activity name = bare agent_id,
   so two versions of one agent cannot run side by side.
 Quality metrics are self-referential: align_f1 treats every mapping as correct; ntdc and logo
-  use proxies; segmentation ece fixed at 0.0. Metric code:
-  services/libs/helix_platform_libs/src/helix_platform_libs/evaluation_framework/metrics.py.
+  use proxies; ECE read from core output with default 0.0 and never set.
 linguistic-agent-contract.json: draft for an 11th agent (linguist-agent), loaded by nothing.
 
 ## Failure behaviour (04)
@@ -282,10 +276,10 @@ Worker: no max_concurrent_activities (SDK default 100 slots) against 32 / 64 thr
 LLM errors are swallowed: segmentation saves *_mapping_error per region and continues
   (pipeline.py:L3316-L3322); no Retry-After, no max_tokens, no finish_reason check;
   logo returns empty block_analysis on parse error (logo_agent.py:L388-L396, L1076);
-  ntdc call_llm returns None and its checks fail open (ntdc llm.py:L82-L103, L168, L206),
-  one hard-coded dev URL, 20 s timeout. OpenAI SDK default max_retries 2. No circuit breaker.
+  ntdc call_llm returns None and its checks fail open (ntdc llm.py:L82-L103, L168, L206).
+  OpenAI SDK default max_retries 2. No circuit breaker.
 Page limit: MAX_PAGES 20 stops silently at page 21 (pipeline.py:L684-L685); Azure DI analyses
-  and bills every page ($10 per 1,000 pages, L609); DI poll 300 s; DI cache written only on success.
+  and bills every page; DI poll 300 s; DI cache written only on success.
 validation: a raised child exception discards sibling results and retries all three.
 broker_clients: every HTTP error -> BrokerError (raised, retried), 4xx and 429 included;
   attempt=1 hard-coded; Retry-After lost; missing token signer is retried too.
@@ -303,6 +297,36 @@ Intake: dedup dict and case_id counter in process memory; no message_id on publi
 Detection: no alert rules; Gateway logs via logging.basicConfig; agent cores print.
 Registry quarantine status is built (registry_svc domain/lifecycle.py:L10-L14); the
   quarantined_version_pin gate is not.
+
+## LLM layer (13)
+Call sites (all called directly, not through brokers or UAIS):
+  segmentation - GPT-4.1 line mapping with character offsets (up to 6 concurrent, 120 s),
+    GPT-4.1 judge (one call per mapping, EVAL_SEGMENTATION true), gemini-embedding-001 on
+    Vertex AI (batch 64; silently falls back to local hash embeddings if init fails,
+    pipeline.py L3623-L3628), Azure DI OCR;
+  logo - gpt-4o vision, json_object, temperature not set (API default 1.0), fallbacks
+    gpt-4.1 and o4-mini; ntdc - GPT-4.1 through a hard-coded dev proxy URL, temperature 0,
+    two rule prompts; bisu - gemini-3.5-flash on Vertex AI, temperature not set.
+BISU review prompt cannot render: .format() on a template with literal JSON braces raises
+  KeyError; caught per page, so every candidate issue is kept (llm_false_positive_filter.py
+  L567-L600, L201-L208).
+Prompts: hard-coded fallbacks in core; step_config.prompt_text overrides; logo and bisu try a SQL
+  prompt library (helix_prompt_library) with no backing connector; Registry prompt_versions has
+  no reader; prompt id, version and hash are not recorded per run.
+Credentials: AZURE_OPENAI_API_KEY; a no-auth fallback to a hard-coded dev translation-service
+  host (config.json FASTAPI_BASE_URL); service-account key-file paths in committed config;
+  the UAIS connector (prototype, unused) fetches one OAuth token and never refreshes it.
+UAIS staging report 2026-10-19: gpt-5.4, gpt-4.1, gpt-4.1-mini, text-embedding-3-large PASS;
+  gemini-3.5-flash and gemini-embedding-001 FAIL (HTTP 500). Porting guide maps
+  gpt-4o -> gpt-4.1_2025-04-14 and o4-mini -> gpt-5.4_2026-03-05.
+Judge: labels correct / partial / incorrect plus 0-100; strict_accuracy = correct / judged with
+  errored rows dropped; weighted adds 0.5 for partial; kept only in pipeline_report; not
+  cost-tracked; same GPT-4.1 as the mapper.
+Prices in code: GPT-4.1 $2 in / $8 out per 1M tokens; Gemini embedding $0.15 per 1M;
+  DI $10 per 1,000 pages (a 20-page pair = $0.40 of DI). No sample cost report.
+Evaluation: 33 metric functions and a 24-entry catalog (evaluation_framework/metrics.py,
+  catalog.py); metrics backend is design only; no gold set; threshold origin unknown.
+ADR 0007: regulated EN->ES translation stays with the human MCS function; LLM output is advisory.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
@@ -323,6 +347,7 @@ Broker HTTP timeout 20 s; broker URLs default to localhost:8081 / 8082.
 01 sections 7.9 and 9: ADR 0004, 0006, 0012, 0020, 0023.
 02 sections 3 and 9: ADR 0011 in practice (logo loop), ADR 0019 gaps (paths, values in history).
 04 P and B1: ADR 0022 (recall half built), ADR 0029, the error taxonomy.
+13 section 10 Q6: ADR 0007; 13 section 3: ADR 0015 applied to model access.
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
@@ -333,8 +358,7 @@ Broker errors are RAISED (Temporal retries).
 ## MCS workflow (services/MCS_workflow_config_v1.json, config only, nothing reads it)
 detect-lang-agent -> segmentation-agent -> validation-agent -> annotate-agent
 wired by input_bindings.*.producer; annotate-agent hitl_enabled, SLA 1-4 h, escalation 0.5 h.
-Domain: regulated English<->Spanish CMS member materials; MCS = human translation
-function (ADR 0007).
+Domain: regulated English<->Spanish CMS member materials; MCS = human translation function.
 
 ## Docs vs code
 Start hop: gRPC in ADR 0031, HTTP /start in code; neither exists.
@@ -400,6 +424,25 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 **How to answer "How does your system survive failures?" in 60 seconds**
 
 "Helix's design has the right building blocks: durable workflows, deterministic IDs and a quarantine model. The code that exists shows three failure patterns. Retries are unbounded, because no retry policy is set. Failures degrade silently, because LLM errors are swallowed and ntdc fails open. And handoff breaks across pods, because steps pass local file paths. My first three fixes would be: one shared activity-options helper with bounded retries, heartbeats and non-retryable input errors; typed LLM errors that turn into gate signals instead of empty results; and artifacts passed as Blob references. Then four alerts: retries rising, cases past their SLA, gate rate per rule, and dead-letter count."
+
+**13-llm-layer.md — corrections**
+
+- Section 1's "five model families, including an unnamed proxy model" muddles it. Say instead: two vendors — OpenAI models (GPT-4.1, gpt-4o and its fallbacks) through Azure or a proxy, and Google Gemini (embeddings, Flash) through Vertex AI — plus Azure DI for OCR, which is not an LLM. The "unnamed proxy model" is GPT-4.1 by the file's own table.
+- "Logo temperature not set (model default)": the API default is 1.0, the most random setting, on the call whose score drives logo gates. The fallback o4-mini accepts no temperature setting at all, so a fix must set it per model.
+- Q7: dropping errored rows from `strict_accuracy` is not neutral. In a 429 storm the judge drops the rows it failed on, which may be the hardest pairs, so accuracy can look better exactly when the run is worse. Report coverage beside accuracy.
+- Section 9 item 1 is right, but name the direction it fails: the broken BISU review keeps every candidate issue, the safe direction (more review work). ntdc fails the other way, open. Contrasting the two shows you understand fail-open vs fail-closed.
+
+**13 — gaps it missed** (my review)
+
+1. **An LLM does a job a classic algorithm does better.** Sentence alignment with multilingual embeddings plus dynamic programming (the approach of tools like vecalign) is cheaper, repeatable and auditable. Use the LLM only for low-confidence regions, and ask it for substrings, never character offsets.
+2. **Code should check what code can check.** Numbers, dates and amounts can be compared exactly in code, yet ntdc asks an LLM about digit forms and then fails open. Keep the LLM for meaning and omissions.
+3. **No run-to-run agreement.** With temperature unset, the same page can gate today and pass tomorrow. The framework has a `determinism()` function; nothing runs it on real model output.
+4. **Document text leaves for two clouds.** Pages go to Azure OpenAI and Google Vertex AI with no redaction in code. Which agreements cover that is a question for 10.
+5. **Prompts have no regression tests.** A one-line render test would have caught the BISU crash, and a prompt change has no evaluation gate.
+
+**How to answer "How do you know your LLM output is good?" in 60 seconds**
+
+"Honestly, in Helix today we can't prove it. The quality metrics are computed from each agent's own output: alignment F1 counts every mapping as correct, and calibration error defaults to zero. Thresholds have no recorded origin. My plan is a labelled gold set — a few hundred real document pairs, labelled by two reviewers with an agreement check — and real precision and recall per agent with confidence intervals. Thresholds come from a precision-recall curve on a dev split and are confirmed once on a held-out test split. Then every failure fails closed into a gate, model versions are pinned, prompt and model are recorded with every result, and a nightly run on fixed pairs catches drift. And one rule: nothing auto-approves on a number we haven't measured."
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -707,45 +750,76 @@ Interviewers judge failure answers by their structure, not by how many tools you
 
 ### 07 — Deployment and scale
 
+Read the [Deploying and Scaling Agents on Azure primer](https://claude.ai/artifact/NYggmvFdeqN7Hnp2EUw5pa) first. It explains every Kubernetes and Azure concept from zero, so this prompt tells Copilot to skip the theory and spend your credits on Helix's real files and the scaling questions.
+
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Refer to, do not repeat: 04 scenarios A, B, C and O (pod kill, lock and KEDA,
-outage herd, local-path handoff) and 04 B6.
+Changes for this file:
+- I have read a Kubernetes and Azure primer. Do not explain general concepts (pod,
+  Deployment, Helm, KEDA, HPA, node pool, workload identity, probes). Explain only how
+  Helix uses them, with file and line.
+- Use this shape instead of STYLE's 12 sections: 1 one-line answer; 2 altitude 30,000 ft;
+  Part A; Part B; Part C; Part D; Interview Q&A; Glossary (new terms only); Files read.
+- Tag every assumption [ASSUMPTION] and every calculation (calc).
+Refer to, do not repeat: 04 A, B, C, O and B6; 13 Q11.
 
-Topic: How Helix is deployed and scaled, and whether the scaling design matches
-where the real bottlenecks are.
+Topic: Every deployable piece of Helix - how it gets from code to running on Azure,
+how it is configured, and how it scales.
 
 Read:
-- infra/helm/agents-worker/ (templates and all values-*.yaml), infra/helm/identity-policy/values.yaml,
-  infra/helm/_partials/ (all), infra/k8s/, infra/README.md
+- infra/helm/agents-worker/ (templates and all values-*.yaml), infra/helm/identity-policy/
+  (templates and values), infra/helm/_partials/ (all), infra/k8s/, infra/README.md
 - agents/Dockerfile, plus the Dockerfiles of trigger_intake_svc, trigger_gateway_svc,
-  cell_router_svc and registry_svc
+  cell_router_svc, registry_svc and identity_policy
 - services/docker-compose.yaml, docker-compose.dev.yaml
 - agents/src/agents/perf/ (all), agents/scripts/run_load_test.sh, agents/tests/perf/
-- docs/spec/*agent-deployment-option-a*, docs/implementation/platform-at-scale-topology.md,
-  docs/implementation/12-agent-deployment-option-a-implementation.md
-- docs/spec/*azure-technology-stack* (service list only)
+- docs/spec/*agent-deployment-option-a*,
+  docs/implementation/12-agent-deployment-option-a-implementation.md,
+  docs/implementation/platform-at-scale-topology.md
+- docs/spec/2026-09-11-aks-temporal-distributed-architecture-design.md (Temporal deployment,
+  capacity and cell sections only)
+- docs/spec/*azure-technology-stack*, *azure-starter-service-configuration* (services and sizes only)
 - docs/adr/ 0013, 0014, 0016, 0020, 0024 (Decision only)
 
-Answer:
-1. Deployable units table: image, base image, port, Helm chart (or none), image tag policy.
-2. agents-worker chart: resources, probes (what liveness and readiness check), env,
-   secrets source, service account and workload identity, PodDisruptionBudget,
-   ephemeral-storage limits, and how one chart deploys two pools. [NOT FOUND] for missing items.
-3. values-dev, staging, prod and dummy: what differs. Table.
-4. KEDA: scaler type, query, thresholds, min and max per environment. Who emits
-   temporal_activity_task_queue_backlog (Temporal server metrics, an exporter, nothing)?
-5. Capacity math: each pool's prod max replicas x threads = maximum concurrent activities.
-   Compare with what Azure OpenAI and Azure DI can serve (quota numbers if documented,
-   else [NOT FOUND]). Is the LLM pool's max replicas bounded by provider quota anywhere?
-6. How Temporal is hosted: local (compose), dev cluster (temporal-frontend.dev...), and
-   the design (one cluster per cell, persistence store). What is decided vs open.
-7. Cells, control plane, data plane and namespace isolation (ADR 0014, 0020, 0024):
-   plain explanation with one diagram.
-8. "Agent deployment option A": what it is, why temporary, what replaces it.
-9. Azure services table: service, purpose, built or designed.
-10. Load test: what it sends, what it measures, committed results ([NOT FOUND] if none).
-11. With no CD workflow, how would a change reach AKS today? [NOT FOUND] if undocumented.
+Part A - one block per deployable: agents-worker deterministic pool, agents-worker LLM pool,
+identity-policy, trigger intake, trigger gateway, cell router, registry, Temporal server,
+and the designed orchestrator worker. Each block has these labelled lines:
+  Code to image: Dockerfile, base image, start command, user, image size if stated
+  Image to cluster: Helm chart or none, values files, namespace, how it would be deployed
+  Runtime: replicas, CPU and memory requests and limits, probes, env vars, secrets source,
+    identity, ports, what it connects to
+  Scaling: signal, min and max per environment, what limits it
+  Gaps [IDEA]: what is missing, and one fix
+
+Part B - the platform around the pods. Table: Azure service, purpose, size or tier if stated,
+built or designed, where configured. Then: AKS node pools (VM sizes, counts), Temporal
+hosting (services, persistence store, shard count, namespaces per cell), and how one
+cell is laid out.
+
+Part C - (1) one Mermaid diagram of a cell's runtime topology, max 15 boxes;
+(2) one table: each piece, built today vs designed.
+
+Part D - scaling deep dive. Real numbers from files; tag assumptions.
+1. The chain from rising backlog to a new pod polling, with every delay taken from config
+   (KEDA polling, cooldown, HPA behaviour, node add, image pull, worker start).
+2. Who emits temporal_activity_task_queue_backlog (Temporal server metrics, an exporter,
+   nothing)? What happens to scaling if nobody does?
+3. Capacity at prod max per pool: replicas x threads vs SDK activity slots. Then Little's Law
+   with the designed 32 starts/s average and 650-950 peak: activities in flight per pool,
+   pods needed, and whether max replicas covers it.
+4. Provider limits: the LLM pool's maximum concurrency vs any Azure OpenAI, Vertex AI or
+   Document Intelligence quota written in the repo ([NOT FOUND] if none).
+5. What breaks first at 10x load? Rank provider quota, Temporal persistence and shards,
+   Postgres connections, Service Bus, the KEDA metric, node capacity and cost, with evidence.
+6. Scale-down safety: graceful shutdown 30 s vs the longest activity,
+   terminationGracePeriodSeconds, PodDisruptionBudget, cooldown. Can a scale-down lose work?
+7. Noisy neighbour: one tenant's burst today (shared queues) vs with cells. Any fairness control?
+8. Cost levers: which pool could use spot VMs or scale to zero; any cost numbers in the docs.
+9. "Agent deployment option A": what it is, why temporary, what replaces it.
+10. With no CD workflow, how would a change reach AKS today?
+
+Interview Q&A: 8 hard deployment and scaling questions a CTO would ask about Helix,
+4-6 sentences each: what exists, what is missing, what I would do.
 
 Write the result to helix-study/07-deploy-scale.md
 ```
@@ -850,9 +924,10 @@ Write the result to helix-study/13-llm-layer.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Refer to, do not repeat: 04 Q (broker error handling), 04 E (intake dedup).
+Refer to, do not repeat: 04 Q (broker error handling), 04 E (intake dedup),
+13 section 8c (credentials and endpoints).
 
-Topic: Security in Helix - identity policy, brokers, capability tokens, PHI and secrets.
+Topic: Security in Helix - identity policy, brokers, capability tokens, PHI and where it goes.
 
 Read:
 - services/identity_policy/ (code, .rego files, Rego tests), infra/helm/identity-policy/values.yaml
@@ -861,9 +936,8 @@ Read:
 - services/libs/helix_platform_libs/src/helix_platform_libs/content_reference.py
 - broker_clients.py (token code, L22-L69)
 - services/trigger_intake_svc/src/trigger_intake_svc/config.py and api/status.py (auth only)
-- agents/src/agents/legacy_compat/ and each agent's core config files (secrets and endpoints only)
 - docs/spec/*identity-policy-design*, *trust-boundary-sandbox-brokers-design*,
-  *memory-broker-design* (decisions and flows only)
+  *memory-broker-design* (decisions and flows only; include the LLM Broker redaction design)
 - docs/adr/ 0015, 0018, 0019, 0021, 0024, 0026, 0030, 0033 (Decision only)
 - docs/implementation/pending-decisions.md (rows 10-14)
 
@@ -878,8 +952,9 @@ Answer:
    would signing fix?
 6. Where PHI rests today (local disk under /tmp, logs, Temporal history, in-memory blobs)
    vs where the design allows it. Table.
-7. Secrets and endpoints in code and config: hard-coded URLs, key files, AZURE_* settings.
-   List each with its risk; never print secret values.
+7. Which external providers receive document content today (Azure OpenAI, Vertex AI,
+   Azure DI, the dev proxy hosts)? Is any redaction applied before a call? Which agreement,
+   setting or doc in the repo covers sending PHI to them? [NOT FOUND] if none.
 8. Crypto-shredding, retention and legal hold (ADR 0021) in plain words, and the
    phi_broker tables that support them.
 9. Row-level security: which tables use it, and how app.tenant_id is set.
@@ -942,7 +1017,8 @@ Read:
 Reuse instead of re-reading: 00-big-picture.md section 11 (Q7 table);
 00t-temporal-primer.md part 10 (ADR 0011, 0019); 01-orchestration.md sections 7.9 and 9
 (ADR 0004, 0006, 0012, 0020, 0023); 02-agents-layer.md section 3 (ADR 0011 in practice);
-04-failure-recovery.md P and B1 (ADR 0022, 0029, error taxonomy).
+04-failure-recovery.md P and B1 (ADR 0022, 0029, error taxonomy);
+13-llm-layer.md section 10 Q6 (ADR 0007) and section 3 (ADR 0015 for model access).
 
 Answer:
 1. Table of all 33 ADRs: number, decision in one plain line, problem solved,
@@ -955,7 +1031,7 @@ Answer:
 6. Pending decisions and future specs: why each matters.
 7. The 5 decisions hardest to reverse, and why.
 8. Where a sound decision met weak implementation (for example ADR 0019 vs local-path
-   handoff, ADR 0022 vs no pin check): one table.
+   handoff, ADR 0022 vs no pin check, ADR 0015 vs direct model keys): one table.
 
 Write the result to helix-study/15-tradeoffs.md
 ```
