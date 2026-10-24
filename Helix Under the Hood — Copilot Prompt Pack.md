@@ -36,8 +36,8 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 02 | 02-agents-layer.md | Inside an agent, registration, handoff, gate signals | Opus, medium | Done |
 | 04 | 04-failure-recovery.md | How agents survive real failures: verdicts, gaps, fixes | Opus, high | Done |
 | 13 | 13-llm-layer.md | Prompts, models, credentials, evaluation, cost | Opus, medium | Done |
-| 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Must, next |
-| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must |
+| 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Done |
+| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must, next |
 | 09 | 09-operations.md | Designed observability, audit, alerts, CI/CD | Sonnet, medium | Should |
 | 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers | Sonnet, medium | Should |
 | 12 | 12-catalog-vendors.md | Registry, version pinning, vendor kit | Sonnet, medium | If time |
@@ -129,13 +129,13 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in the 00, 00t, 01, 02, 04 and 13 study files
+# Helix facts - verified in the 00, 00t, 01, 02, 04, 13 and 07 study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
-Temporal concepts: helix-study/00t-temporal-primer.md. Orchestrator and gate design:
-helix-study/01-orchestration.md. Agents, gate rules, thresholds: helix-study/02-agents-layer.md.
-Failure scenarios, retry budget, scorecard: helix-study/04-failure-recovery.md.
-Models, prompts, credentials, evaluation plan: helix-study/13-llm-layer.md.
+Temporal concepts: 00t-temporal-primer.md. Orchestrator and gates: 01-orchestration.md.
+Agents, gate rules, thresholds: 02-agents-layer.md. Failures, retry budget, scorecard:
+04-failure-recovery.md. Models, prompts, evaluation: 13-llm-layer.md. Deployables, Azure
+platform, scaling: 07-deploy-scale.md. (All in helix-study/.)
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -152,7 +152,8 @@ NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no work
               workflow patching, continue-as-new, Gate Service API, sweeper,
               runtime telemetry (Prometheus / OTel) in agents and the wrapper,
               alert rules anywhere, a RetryPolicy passed anywhere, a gold set,
-              PHI redaction before model calls
+              PHI redaction before model calls, CD, Bicep, a Temporal chart,
+              any emitter of the KEDA backlog metric, provider quota numbers
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -176,7 +177,7 @@ Only runnable workflows (tests / perf):
          agents/tests/activity/test_dummy_agents_worker_e2e.py:L16-L42
          agents/src/agents/perf/probe_workflow.py, agents/src/agents/perf/load_test.py:L50-L70
 Local:   services/docker-compose.yaml:L11-L42 (temporalio/auto-setup :7233, UI :8233)
-Scaling: infra/helm/agents-worker/values.yaml, templates/scaledobject.yaml
+Scaling: infra/helm/agents-worker/values*.yaml, templates/scaledobject.yaml
 
 ## Temporal details
 Activity registration: @agent_activity -> temporalio.activity.defn(name=agent_id)
@@ -270,9 +271,8 @@ linguistic-agent-contract.json: draft for an 11th agent (linguist-agent), loaded
 Retries: no RetryPolicy is passed anywhere, so Temporal's default applies once an orchestrator
   exists: unlimited attempts, 1 s doubling to 100 s, bounded only by the 30-day workflow
   timeout. Raised bad input (ntdc LanguagePairError, annotate FileNotFoundError) would loop.
-Worker: no max_concurrent_activities (SDK default 100 slots) against 32 / 64 threads; no
-  heartbeat on single-shot agents; Helm sets no terminationGracePeriodSeconds; image tag
-  latest, not overridden in prod; memory limit 2 Gi; prod min 4, max 120 replicas.
+Worker: no max_concurrent_activities (SDK default 100 slots) against the thread pool; no
+  heartbeat on single-shot agents.
 LLM errors are swallowed: segmentation saves *_mapping_error per region and continues
   (pipeline.py:L3316-L3322); no Retry-After, no max_tokens, no finish_reason check;
   logo returns empty block_analysis on parse error (logo_agent.py:L388-L396, L1076);
@@ -317,29 +317,56 @@ Credentials: AZURE_OPENAI_API_KEY; a no-auth fallback to a hard-coded dev transl
   host (config.json FASTAPI_BASE_URL); service-account key-file paths in committed config;
   the UAIS connector (prototype, unused) fetches one OAuth token and never refreshes it.
 UAIS staging report 2026-10-19: gpt-5.4, gpt-4.1, gpt-4.1-mini, text-embedding-3-large PASS;
-  gemini-3.5-flash and gemini-embedding-001 FAIL (HTTP 500). Porting guide maps
-  gpt-4o -> gpt-4.1_2025-04-14 and o4-mini -> gpt-5.4_2026-03-05.
-Judge: labels correct / partial / incorrect plus 0-100; strict_accuracy = correct / judged with
-  errored rows dropped; weighted adds 0.5 for partial; kept only in pipeline_report; not
-  cost-tracked; same GPT-4.1 as the mapper.
+  gemini-3.5-flash and gemini-embedding-001 FAIL (HTTP 500).
+Judge: strict_accuracy = correct / judged with errored rows dropped; same GPT-4.1 as the mapper.
 Prices in code: GPT-4.1 $2 in / $8 out per 1M tokens; Gemini embedding $0.15 per 1M;
   DI $10 per 1,000 pages (a 20-page pair = $0.40 of DI). No sample cost report.
-Evaluation: 33 metric functions and a 24-entry catalog (evaluation_framework/metrics.py,
-  catalog.py); metrics backend is design only; no gold set; threshold origin unknown.
-ADR 0007: regulated EN->ES translation stays with the human MCS function; LLM output is advisory.
+Evaluation: 33 metric functions, 24-entry catalog (evaluation_framework/); no gold set;
+  threshold origin unknown. ADR 0007: regulated translation stays with human MCS.
+
+## Deployment and scaling (07)
+Images: agents/Dockerfile uses the golden python:3.12-latest-dev base for build AND runtime,
+  uv sync --frozen with an unfrozen fallback, starts python -m agents.worker as PID 1, user
+  appuser, est. 1.5-2.5 GB. CI builds images only for identity-policy, trigger-intake and
+  trigger-gateway -> ACR (registryk8shelix-...azurecr.io:<run_number>), also on pull requests,
+  ACR login by username/password. Cell Router (python:3.11-slim, root, broken build context) and
+  Registry (no uv.lock, root, uv run at start) images have build defects; no CI for them or agents.
+Charts: agents-worker = 2 Deployments + 2 KEDA ScaledObjects; image ghcr.io/...:latest
+  IfNotPresent; no probes, secrets, workload identity, nodeSelector, PDB or grace period.
+  identity-policy = 1 replica, /healthz for both probes, envFrom Secret, optional workload identity.
+  OPA sidecar library chart has no consumer. No chart for intake, gateway, cell router, registry,
+  Temporal or orchestrator. Deploy = manual helm from a laptop.
+Pools (base/dev/staging/prod): det replicas 1/1/2/4, threads 32/32/40/64, KEDA threshold
+  10/8/15/25, max 40/20/60/120; llm replicas 1/1/2/3, threads 64/48/72/96, threshold 5/4/6/10,
+  max 60/30/80/150; requests det 500m/1Gi (limit 2/2Gi), llm 1/2Gi (limit 4/4Gi).
+  Prod llm pool idles: MCS uses neither llm activity.
+KEDA: Prometheus query on temporal_activity_task_queue_backlog at prometheus-operated.monitoring;
+  NOTHING emits that metric, an empty result counts as 0, so pools stay at their minimum; no
+  fallback; no HPA behavior. pollingInterval only matters for 0<->1; with min >= 1 the HPA reads
+  every 15 s and can double pods (or add 4) per 15 s.
+Shutdown: no SIGTERM handler and python runs as PID 1, so SIGTERM is ignored; the worker's 30 s
+  graceful shutdown never starts; the pod is SIGKILLed at the default 30 s.
+Gateway: one Service Bus session receiver per process, bound to one session for life, so each
+  pod drains one case's session. Intake: a new ServiceBusClient per publish; silent in-memory
+  fallback if the connection string is missing.
+Temporal hosting: local auto-setup:latest + Postgres 16 only. Design: dev = one Helm release,
+  Postgres B2s, 512 shards; prod = per-role Deployments, Managed Cassandra (RF 3), Elastic
+  visibility, 4k-16k shards per cell, a namespace per tenant (code uses one per environment).
+Azure: ACR exists (CI pushes); AKS not provisioned (infra/README); no Bicep. Designed node pools
+  system / platform-services / orchestrator / sandboxed; cluster autoscaler scale-down 10 min at
+  0.5 use. No provider quotas written anywhere. DI and Vertex AI are missing from the stack docs.
+Option A: one shared Deployment for all internal agents (temporary); code already has two latency
+  pools; Option B = one Deployment and queue per agent.
+Load test: closed loop, 25 callers, payload points at a /tmp file no pod has; no results.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
 Reuse policy REJECT_DUPLICATE; workflow execution and run timeout 30 d; task timeout 10 min
-Queues: core-agents-deterministic (8 activities, 32 threads, prod 64), core-agents-llm (2, 64 threads)
-Worker graceful shutdown 30 s
-KEDA: metric temporal_activity_task_queue_backlog; deterministic min 1 max 40 threshold 10;
-      llm min 1 max 60 threshold 5; polling 30 s; cooldown 300 s
 Designed retry (docs only, docs/AGENT_INVOCATION_UNIFIED_FLOW.md Phase 2): initial 1000 ms,
       backoff 2.0, max attempts 3, start-to-close 60000 ms, heartbeat 30000 ms
 MCS SLA: end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
-Designed scale: 1B+ runs/year, ~32 starts/s average; p95 < 2 s deterministic step,
-      < 8 s AI step. Orchestrator pool: D4s_v5, 1-5 nodes, 3 workers (04 doc).
+Designed scale: 1B+ runs/year, ~32 starts/s average, 650-950 peak; p95 < 2 s deterministic
+      step, < 8 s AI step (framework spec: 1.5 s and 6 s).
 Broker HTTP timeout 20 s; broker URLs default to localhost:8081 / 8082.
 
 ## Design decisions already summarised
@@ -348,6 +375,7 @@ Broker HTTP timeout 20 s; broker URLs default to localhost:8081 / 8082.
 02 sections 3 and 9: ADR 0011 in practice (logo loop), ADR 0019 gaps (paths, values in history).
 04 P and B1: ADR 0022 (recall half built), ADR 0029, the error taxonomy.
 13 section 10 Q6: ADR 0007; 13 section 3: ADR 0015 applied to model access.
+07 Part B, D7, D9 and Q7: ADR 0013, 0014, 0016, 0020, 0024; Option A vs B.
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
@@ -368,8 +396,8 @@ File paths in docs/AGENT_INVOCATION_UNIFIED_FLOW.md are pseudo-code.
 
 ## Delivery
 Helm charts: identity-policy, agents-worker only.
-CI: identity-policy (3 workflows), trigger-gateway (2), trigger-intake (2).
-No CI for agents, registry, cell router. No CD.
+CI: identity-policy (3 workflows), trigger-gateway (2), trigger-intake (2); images pushed on
+pull requests too. No CI for agents, registry, cell router. No CD.
 ```
 
 ## Corrections to finished files
@@ -443,6 +471,25 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 **How to answer "How do you know your LLM output is good?" in 60 seconds**
 
 "Honestly, in Helix today we can't prove it. The quality metrics are computed from each agent's own output: alignment F1 counts every mapping as correct, and calibration error defaults to zero. Thresholds have no recorded origin. My plan is a labelled gold set — a few hundred real document pairs, labelled by two reviewers with an agreement check — and real precision and recall per agent with confidence intervals. Thresholds come from a precision-recall curve on a dev split and are confirmed once on a held-out test split. Then every failure fails closed into a gate, model versions are pinned, prompt and model are recorded with every result, and a nightly run on fixed pairs catches drift. And one rule: nothing auto-approves on a number we haven't measured."
+
+**07-deploy-scale.md — corrections**
+
+- "$400M a year for Document Intelligence" (D8, Q6): the arithmetic is right, but nothing says the 1B-runs target is all MCS-style 20-page pairs. Use it to show that per-case OCR cost decides the budget at design scale, never as Helix's actual cost.
+- Several limits are tagged \[CONCEPT\] and need checking before you quote them: Document Intelligence about 15 requests per second, Service Bus Standard about 1,000 connections, Postgres B2s about 429 connections, KEDA's Temporal scaler from version 2.17. In interviews, say "around" or "check the current limit".
+- D6 "scale-down picks busy pods": Kubernetes does not look at busyness at all. It can remove any pod, so busy ones get killed too. That points to a fix 07 missed (below).
+- D3's real-code numbers rest on an assumed 2-minute segmentation run. Say "if a run takes two minutes, then…".
+
+**07 — gaps it missed** (my review)
+
+1. **No liveness signal for workers.** A worker that loses its Temporal connection or hangs is never restarted, because it has no probe at all. A small health endpoint fed by the poll loop fixes it.
+2. **Choosing which pod goes.** The `controller.kubernetes.io/pod-deletion-cost` annotation lets busy workers mark themselves expensive to remove, so scale-down takes idle pods first. Pair it with a slower scale-down policy.
+3. **Cold start.** A 1.5–2.5 GB image on a fresh node is a large share of scale-out time. Slimmer per-pool images, or images pre-pulled onto nodes, cut it.
+4. **Pollers, not just pods.** 120–150 pods each polling Temporal add load on Temporal's matching service. Poller counts need sizing too.
+5. **The LLM pool still has no provider cap.** Prod allows 150 pods × 96 threads = 14,400 concurrent calls against a quota nobody wrote down (04, 13).
+
+**How to answer "How is it deployed, and how does it scale?" in 60 seconds**
+
+"The design is a cell-based AKS platform: self-hosted Temporal per cell on Cassandra, a namespace per tenant, and KEDA-scaled worker pools split by latency class. What is built is thinner: Dockerfiles for most services, CI images for three, Helm charts for two, and no deployment pipeline. In the scaling path I found three defects I would fix first. KEDA reads a backlog metric that nothing publishes, so the pools never grow; I would switch to KEDA's Temporal scaler with a fallback. Workers ignore SIGTERM because Python runs as PID 1 with no handler, so every scale-down kills in-flight work; I would add the handler, a grace period above the longest activity, and heartbeats. And the trigger gateway binds each pod to a single session, so each pod handles one case. On capacity, Little's Law says the design's peak needs more pods than the cap, but the model quota and OCR cost run out long before pods do."
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -828,16 +875,19 @@ Write the result to helix-study/07-deploy-scale.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Already known (FACTS, 04 B4): no alert rules, Cell Router metrics never recorded, no
-telemetry in agents, Gateway logs via basicConfig, agent cores print. Do not re-check these.
+Already known (FACTS, 04 B4, 07 D10 and Part A): no alert rules, Cell Router metrics never
+recorded, no telemetry in agents, Gateway logs via basicConfig, agent cores print; CI triggers,
+push on pull requests, ACR password login, run_number tags, image build defects.
+Do not re-check these.
 
-Topic: Operating Helix - the designed observability and audit, alerts, CI/CD and supply chain.
+Topic: Operating Helix - the designed observability and audit, alerts, CI checks and supply chain.
 
 Read:
 - infra/observability/ (all)
 - services/audit_svc/src/audit_svc/migrations/versions/ (both files)
 - services/cell_router_svc/src/cell_router_svc/metrics.py (metric names and types only)
-- .github/workflows/ (all 7 files), .github/actions/setup-opa/action.yml, .github/CODEOWNERS
+- .github/workflows/ (all 7 files: jobs and steps only), .github/actions/setup-opa/action.yml,
+  .github/CODEOWNERS
 - docs/spec/*global-audit-index-observability-design*, *observability-metrics-data-model-design*,
   *arize-agent-observability-design*, *vendor-agent-telemetry-contract-design*,
   *supply-chain-cicd-gate-design*, *sbom-supply-chain* (summary and decisions only)
@@ -853,12 +903,13 @@ Answer:
 5. Arize: what the design sends, and how PHI is kept out.
 6. Debug walkthrough: "case X produced a wrong annotation" - what you can use today,
    and what the design adds.
-7. [IDEA] The minimum alert set for launch, mapped to 04's scenarios: name, condition,
-   threshold, and the scenario it catches.
-8. Each GitHub workflow in one table: trigger and paths, jobs, what is tested,
-   image registry, tag, auth (OIDC or secret).
+7. [IDEA] The minimum alert set for launch, mapped to 04's scenarios and 07's scaling defects:
+   name, condition, threshold, and the scenario it catches.
+8. Each GitHub workflow: what it tests and checks (lint, unit tests, OPA tests, scans,
+   signing), as one table.
 9. The setup-opa action and the three identity-policy workflows as one policy pipeline.
-10. Supply-chain gate and SBOM: designed vs built. What stops a bad change today?
+10. Supply chain: SBOM, signing, scanning, base-image policy, CODEOWNERS - designed vs built.
+    What stops a bad change from reaching production today?
 11. Status table: logging, metrics, tracing, dashboards, alerts, LLM observability,
     audit, CI, CD - [CODE] / [DOCS-ONLY] / [NOT FOUND].
 
@@ -925,7 +976,7 @@ Write the result to helix-study/13-llm-layer.md
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
 Refer to, do not repeat: 04 Q (broker error handling), 04 E (intake dedup),
-13 section 8c (credentials and endpoints).
+13 section 8c (credentials and endpoints), 07 Part A (charts, secrets, identity, users).
 
 Topic: Security in Helix - identity policy, brokers, capability tokens, PHI and where it goes.
 
@@ -960,7 +1011,10 @@ Answer:
 9. Row-level security: which tables use it, and how app.tenant_id is set.
 10. Intake auth off by default, unauthenticated status endpoint, DNS-rebinding gap
     in pull mode: each risk in simple words.
-11. Security controls designed but not built: list, ranked by risk.
+11. Cluster-level security: Kubernetes Secrets made by hand vs Key Vault CSI, workload identity
+    gaps, containers running as root, securityContext, NetworkPolicy and namespace isolation
+    for vendor pods (ADR 0024) - designed vs present.
+12. Security controls designed but not built: list, ranked by risk.
 
 Write the result to helix-study/10-security.md
 ```
@@ -1018,7 +1072,8 @@ Reuse instead of re-reading: 00-big-picture.md section 11 (Q7 table);
 00t-temporal-primer.md part 10 (ADR 0011, 0019); 01-orchestration.md sections 7.9 and 9
 (ADR 0004, 0006, 0012, 0020, 0023); 02-agents-layer.md section 3 (ADR 0011 in practice);
 04-failure-recovery.md P and B1 (ADR 0022, 0029, error taxonomy);
-13-llm-layer.md section 10 Q6 (ADR 0007) and section 3 (ADR 0015 for model access).
+13-llm-layer.md section 10 Q6 (ADR 0007) and section 3 (ADR 0015 for model access);
+07-deploy-scale.md Part B, D7, D9 and Q7 (ADR 0013, 0014, 0016, 0020, 0024).
 
 Answer:
 1. Table of all 33 ADRs: number, decision in one plain line, problem solved,
@@ -1031,7 +1086,8 @@ Answer:
 6. Pending decisions and future specs: why each matters.
 7. The 5 decisions hardest to reverse, and why.
 8. Where a sound decision met weak implementation (for example ADR 0019 vs local-path
-   handoff, ADR 0022 vs no pin check, ADR 0015 vs direct model keys): one table.
+   handoff, ADR 0022 vs no pin check, ADR 0015 vs direct model keys, ADR 0024 vs one shared
+   agents Deployment): one table.
 
 Write the result to helix-study/15-tradeoffs.md
 ```
@@ -1044,9 +1100,10 @@ Before running 16, copy the whole Corrections section of this doc into `helix-st
 Follow the Language and Truth rules in #file:helix-study/STYLE.md.
 Known facts: #file:helix-study/FACTS.md. Corrections: #file:helix-study/CORRECTIONS.md.
 Where a study file conflicts with CORRECTIONS.md, CORRECTIONS.md wins.
-Read only: sections 1, 4, 9 and 10 of each numbered file; the interview questions of
-00t-temporal-primer.md; and from 04-failure-recovery.md the "Interview answer" lines,
-B5, B6 and its Interview Q&A. Nothing else.
+Read only: sections 1, 4, 9 and 10 of each numbered file that uses STYLE's shape; the
+interview questions of 00t-temporal-primer.md; from 04-failure-recovery.md the "Interview
+answer" lines, B5, B6 and its Interview Q&A; from 07-deploy-scale.md section 1, the Part C
+table, D5, D6 and its Interview Q&A. Nothing else.
 
 Write:
 1. 30-second pitch: what Helix is, why it is built this way, and its honest status
@@ -1056,7 +1113,8 @@ Write:
 3. One Mermaid diagram of the whole system, max 15 boxes, built vs designed marked.
 4. The 30 hardest interview questions across all files: 3-5 sentence answers,
    one file reference each.
-5. A 60-second answer to "How does your system survive failures?"
+5. 60-second answers to "How does your system survive failures?" and
+   "How is it deployed, and how does it scale?"
 6. Numbers I can quote: real values only, with source.
 7. Do-not-claim list: everything [DOCS-ONLY] or [NOT FOUND], plus every item in CORRECTIONS.md.
 8. Ten trade-off one-liners: "We chose X over Y because Z; the cost is W."
