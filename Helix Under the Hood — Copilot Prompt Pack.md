@@ -37,11 +37,13 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 04 | 04-failure-recovery.md | How agents survive real failures: verdicts, gaps, fixes | Opus, high | Done |
 | 13 | 13-llm-layer.md | Prompts, models, credentials, evaluation, cost | Opus, medium | Done |
 | 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Done |
-| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Must, next |
-| 09 | 09-operations.md | Designed observability, audit, alerts, CI/CD | Sonnet, medium | Should |
-| 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers | Sonnet, medium | Should |
-| 12 | 12-catalog-vendors.md | Registry, version pinning, vendor kit | Sonnet, medium | If time |
+| 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Done |
+| 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers, cluster security | Sonnet, medium | Should, next |
+| 09 | 09-operations.md | Designed observability, audit, alerts, CI checks, supply chain | Sonnet, medium | Should |
+| 12 | 12-catalog-vendors.md | Registry internals, version pinning, vendor kit | Sonnet, medium | If time |
 | 16 | 16-cheat-sheet.md | Pitch, hardest questions, do-not-claim list | Opus, medium | Must, last |
+
+If you are short on time or credits, skip 12 and go straight to 16 after 10 and 09: FACTS.md and 15 already cover the registry's status and decisions.
 
 The old prompts 03, 05, 06, 08, 11 and 14 are merged into the ones above, or already covered by 00.
 
@@ -129,13 +131,12 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in the 00, 00t, 01, 02, 04, 13 and 07 study files
+# Helix facts - verified in the 00, 00t, 01, 02, 04, 13, 07 and 15 study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
-Temporal concepts: 00t-temporal-primer.md. Orchestrator and gates: 01-orchestration.md.
-Agents, gate rules, thresholds: 02-agents-layer.md. Failures, retry budget, scorecard:
-04-failure-recovery.md. Models, prompts, evaluation: 13-llm-layer.md. Deployables, Azure
-platform, scaling: 07-deploy-scale.md. (All in helix-study/.)
+Temporal concepts: 00t. Orchestrator and gates: 01. Agents, gate rules, thresholds: 02.
+Failures, retry budget, scorecard: 04. Models, prompts, evaluation: 13. Deployables, Azure
+platform, scaling: 07. All 33 ADRs, review, pending decisions: 15. (All in helix-study/.)
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -153,7 +154,8 @@ NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no work
               runtime telemetry (Prometheus / OTel) in agents and the wrapper,
               alert rules anywhere, a RetryPolicy passed anywhere, a gold set,
               PHI redaction before model calls, CD, Bicep, a Temporal chart,
-              any emitter of the KEDA backlog metric, provider quota numbers
+              any emitter of the KEDA backlog metric, provider quota numbers,
+              an automated check enforcing any ADR
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -167,7 +169,6 @@ start call bugs - see "Cell Router start method" below.
 Start:   services/cell_router_svc/src/cell_router_svc/store/temporal_client.py:L67-L70, L106-L200
          services/cell_router_svc/src/cell_router_svc/consumer/intake.py:L177-L187, L236-L268
 Signal:  services/trigger_gateway_svc/src/trigger_gateway_svc/dispatch/signal_dispatch.py:L42-L57
-         services/trigger_gateway_svc/src/trigger_gateway_svc/store/workflow_client.py
          signal name trigger:<step> (services/libs/helix_trigger_lib/src/helix_trigger_lib/route.py:L32-L34)
 Worker:  agents/src/agents/worker.py:L1-L94; agents/src/agents/registry.py:L9-L49
 Wrapper: services/libs/helix_platform_libs/src/helix_platform_libs/agent_activity/
@@ -177,7 +178,6 @@ Only runnable workflows (tests / perf):
          agents/tests/activity/test_dummy_agents_worker_e2e.py:L16-L42
          agents/src/agents/perf/probe_workflow.py, agents/src/agents/perf/load_test.py:L50-L70
 Local:   services/docker-compose.yaml:L11-L42 (temporalio/auto-setup :7233, UI :8233)
-Scaling: infra/helm/agents-worker/values*.yaml, templates/scaledobject.yaml
 
 ## Temporal details
 Activity registration: @agent_activity -> temporalio.activity.defn(name=agent_id)
@@ -185,219 +185,120 @@ Activity registration: @agent_activity -> temporalio.activity.defn(name=agent_id
   core_fn runs with BrokerError uncaught, so Temporal retries it (L112).
 Heartbeat: only reasoning_loop / harness_loop agents get report_progress -> heartbeat
   (wrapper.py:L55-L81); single-shot agents use a no-op. logo drops it on its core path.
-Worker: TEMPORAL_NAMESPACE default "default" (worker.py:L21); CORE_AGENTS_QUEUE_CLASS
-  all | deterministic | llm picks the queues (L33-L40); one Worker per queue via
-  asyncio.gather (L83-L86); production = one Deployment per class, "all" is for dev (L1-L6).
-  registry.py "dummy" profile registers only the two dummy agents (L15-L22).
-Test chain: DummyChainProbeWorkflow, id probe-dummy-chain-wf, queue core-agents-deterministic,
-  start_to_close 30 s per activity (_dummy_chain_probe_workflow.py:L16, L27) - the only
-  timeout passed in code; WorkflowEnvironment.start_local() (test_dummy_agents_worker_e2e.py:L18).
+Worker: CORE_AGENTS_QUEUE_CLASS all | deterministic | llm picks the queues (worker.py:L33-L40);
+  one Worker per queue via asyncio.gather (L83-L86); TEMPORAL_NAMESPACE default "default".
+Test chain: DummyChainProbeWorkflow on core-agents-deterministic, start_to_close 30 s per activity
+  (_dummy_chain_probe_workflow.py:L16, L27) - the only timeout passed in code.
 Cell Router start method (temporal_client.py:L106-L200): named start_workflow but calls
   execute_workflow (blocks up to the 30-day run timeout); TypeError from workflow= plus a
   positional input; wrong keyword workflow_id_reuse_policy (Python SDK: id_reuse_policy);
-  comment L185-L186 wrongly says it returns a handle, so run_id at L187 would be empty.
-  Correct parts: REJECT_DUPLICATE default (L112, L163-L164), deterministic ID (L125-L130),
-  WorkflowAlreadyStartedError treated as success (L116-L120, L195-L197).
+  run_id at L187 would be empty. Correct parts: REJECT_DUPLICATE default, deterministic ID,
+  WorkflowAlreadyStartedError treated as success.
 Signal: Gateway raises NoLiveRun when the Directory row is missing or status != "open"
-  (signal_dispatch.py:L43-L49) -> dead-letter rejected_no_run; else it signals the run_id
-  stored in the row (L51-L57). Directory status: open | dehydrated | closed
-  (cell_router_svc workflow_directory.py:L36).
+  (signal_dispatch.py:L43-L49). Directory status: open | dehydrated | closed.
 
 ## Orchestrator and gates design (01)
-Design: GenericOrchestratorWorkflow walks a recipe tree (execute_node): step, sequential,
-  parallel (join all only), loop_until (on_exhausted gate | fail), subflow (inline,
-  depth <= 5). No if/else node. Spec: docs/spec/2026-09-16-generic-orchestrator-workflow-
-  design.md; sketch: docs/implementation/04-generic-orchestrator-implementation.md L131-L232.
-Designed activities: PinVersions, LoadWorkflowConfig, BuildContext, CheckEffectLedger,
-  RecordEffect, WriteAudit, WriteSla, WriteOutcome, RaiseGate, Dehydrate. None built.
-Registry POST /resolve-pins is built: flat list pins[{entity_type, entity_id, version}]
-  (registry_svc resolve_pins.py:L24-L58); the 04 sketch expects a dict.
-Config: MCS_workflow_config_v1.json fails workflow-config.schema.json (missing tenant_id,
-  recipe); no additionalProperties:false; no field for task queue, timeouts or retry.
-  MCS min/max/escalation_sla_hours and auto_approve_gate are defined nowhere.
-cases: 7 statuses; trigger case_transition_guard BEFORE UPDATE OF status:
-  created->in_progress; in_progress->awaiting_review|completed|rejected|failed|cancelled;
-  awaiting_review->in_progress|failed|cancelled; terminal states frozen; a same-state
-  update raises; INSERT unguarded. Columns include pinned_versions, dehydrated (bool),
-  dehydration_state, SLA clocks; RLS on tenant_id; no column for step outputs.
-effect_ledger: PK (workflow_id, step_id, loop_iteration, logical_effect_id), outcome JSONB,
-  effected_at; no "started" marker. No MCS step is side_effecting.
-gates: gate_type confidence | policy | exception (HITL spec lists 5); status
-  open | resolved | escalated | terminal; terminal_disposition failed | park; resolution_type
-  approve | override | correction | reject | escalate | timeout; index WHERE status='open'.
-  decisions: PK gate_id, no PHI.
-Gate design: dehydrate when expected dwell > ~1 h (provisional, arch 6.8); saved state
-  {pinned_versions, last_context_snapshot_ref, resume_at_step_id}; sweeper CronJob ~60 s;
-  gate token EdDSA JWT, 2 h in-run / 24 h dehydrated; single-winner
+GenericOrchestratorWorkflow walks a recipe tree: step, sequential, parallel (join all),
+  loop_until, subflow (inline, depth <= 5). No if/else node. Designed activities: PinVersions,
+  LoadWorkflowConfig, BuildContext, CheckEffectLedger, RecordEffect, WriteAudit, WriteSla,
+  WriteOutcome, RaiseGate, Dehydrate. None built. Registry POST /resolve-pins is built.
+Config: MCS_workflow_config_v1.json fails workflow-config.schema.json; no field for task queue,
+  timeouts or retry.
+cases: 7 statuses; trigger forbids illegal moves and same-state updates; INSERT unguarded;
+  pinned_versions, dehydrated, dehydration_state, correlation_id, legal_hold; no step-output column.
+effect_ledger: PK (workflow_id, step_id, loop_iteration, logical_effect_id); no "started" marker.
+gates: gate_type confidence | policy | exception; status open | resolved | escalated | terminal;
+  terminal_disposition failed | park; decisions: PK gate_id, no PHI.
+Gate design: dehydrate above ~1 h dwell; sweeper ~60 s; gate token EdDSA JWT; single-winner
   UPDATE ... WHERE status='open'; reviewer holds required_role and is not the submitter.
-Spec says agent status ok | needs_gate | failed; code says success | needs_gate | failed.
 
 ## Agents layer (02)
-Agent folder: activity.py (entry), core/ (legacy code, unchanged), mappers.py (contract <-> core),
-  contract/<agent>.contract.json (the real schema authority, loaded at import by contract.py),
-  data_model/ and io_models/base.py (reference models, unused at runtime), payload_template.json
-  (nested; activities need a flat dict; only the demo notebook flattens it).
-Wrapper modes: automatic (core_fn + input_mapper + output_normalizer, wrapper.py:L104-L134);
-  custom (decorated function is the whole body; segmentation uses it for its global pipeline_lock).
-Input check: presence only on input.payload and step_config, no types, case_id unchecked
-  (contract.py:L73-L93). Output check: dynamic pydantic model, extra=forbid (contract.py:L212-L260);
-  a failure returns CONTRACT_OUTPUT_VALIDATION_ERROR after the work ran.
-Gate status: needs_gate if ANY signal, severity ignored; hitl_required set but unread
-  (envelope.py:L86-L91). Code emits 24 rule ids (DETECT_LANG_*, SEG_*, LOGO_*, NTDC_*, BISU_*,
-  TR_SUB_AGENT_FAILED); 15 other ids exist only in contracts. Thresholds hard-coded per mapper,
-  overridable by step_config.metric_thresholds. Only detect-lang reads contract gate_conditions.
-  Full table: 02 section 8a.
-Agents: deterministic queue - dummy1, dummy2, detect-lang, segmentation (calls GPT-4.1 and Gemini
-  anyway), validation, ntdc, bisu, annotate; llm queue - logo, translation-review.
-  validation runs logo, ntdc and bisu in-process in a ThreadPoolExecutor
-  (agents/src/agents/activities/validation_agent/activity.py:L101-L107) and collects their signals;
-  annotate reads them from final_agent_output.json and emits no signals itself.
-  translation-review runs segmentation, the validation children and annotate in ONE activity.
-  NTDC = Numbers, Dates, Times, Currencies; BISU (not expanded in code) = bold, italic,
-  underline, font size.
-Handoff: local file paths. Artifacts in /tmp/helix-artifacts/<case>/downstream_artifacts/<agent>
-  (artifacts.py:L81-L83); segmentation uses SEGMENTATION_ARTIFACTS_ROOT. No shared volume in
-  the Helm chart. Segmentation returns mapped_regions and the run_summary mapping list by value,
-  so they enter Temporal history.
-Contract activity_options are data only (nothing reads them): 30 s for deterministic agents,
-  120 s for logo and translation-review, max attempts 3, logo heartbeat 30 s.
-Versions: contract_version 1.0.0 everywhere, never compared; activity name = bare agent_id,
-  so two versions of one agent cannot run side by side.
-Quality metrics are self-referential: align_f1 treats every mapping as correct; ntdc and logo
-  use proxies; ECE read from core output with default 0.0 and never set.
-linguistic-agent-contract.json: draft for an 11th agent (linguist-agent), loaded by nothing.
+Agent folder: activity.py, core/ (legacy, unchanged), mappers.py, contract/*.contract.json (the
+  real schema authority), data_model/ and io_models/base.py (unused at runtime), payload_template.json.
+Input check presence only; output check extra=forbid after the work ran.
+needs_gate if ANY signal, severity ignored. 24 rule ids in code, 15 more only in contracts.
+Agents: deterministic queue - dummy1, dummy2, detect-lang, segmentation (calls GPT-4.1 and
+  Gemini anyway), validation, ntdc, bisu, annotate; llm queue - logo, translation-review.
+  validation runs logo, ntdc, bisu in-process; translation-review runs everything in ONE activity.
+Handoff: local /tmp file paths; segmentation returns its mapping list by value into history.
+Contract activity_options are data only. Versions never compared; activity name = bare agent_id.
+Quality metrics are self-referential (align_f1, proxies, ECE default 0.0).
 
 ## Failure behaviour (04)
-Retries: no RetryPolicy is passed anywhere, so Temporal's default applies once an orchestrator
-  exists: unlimited attempts, 1 s doubling to 100 s, bounded only by the 30-day workflow
-  timeout. Raised bad input (ntdc LanguagePairError, annotate FileNotFoundError) would loop.
-Worker: no max_concurrent_activities (SDK default 100 slots) against the thread pool; no
-  heartbeat on single-shot agents.
-LLM errors are swallowed: segmentation saves *_mapping_error per region and continues
-  (pipeline.py:L3316-L3322); no Retry-After, no max_tokens, no finish_reason check;
-  logo returns empty block_analysis on parse error (logo_agent.py:L388-L396, L1076);
-  ntdc call_llm returns None and its checks fail open (ntdc llm.py:L82-L103, L168, L206).
-  OpenAI SDK default max_retries 2. No circuit breaker.
-Page limit: MAX_PAGES 20 stops silently at page 21 (pipeline.py:L684-L685); Azure DI analyses
-  and bills every page; DI poll 300 s; DI cache written only on success.
-validation: a raised child exception discards sibling results and retries all three.
-broker_clients: every HTTP error -> BrokerError (raised, retried), 4xx and 429 included;
-  attempt=1 hard-coded; Retry-After lost; missing token signer is retried too.
-error-taxonomy.json: 6 codes (validation_error, unsupported_contract_version, payload_too_large,
-  timeout, capability_denied, internal_error); no retryable field in the JSON; used only
-  inside vendor-kit.
-Cell Router: after a crash, redelivery hits DuplicateCaseError and the start is never retried;
-  reconciliation sweep (consumer/reconciliation_sweep.py) ignores run_id='', scans up to 1,000
-  open rows, writes terminal_unknown which the table CHECK rejects, has no replica lock;
-  mark_orphaned_as_failed has no caller. 11 Prometheus metrics defined, none recorded.
-Gateway: MissingCaseId escapes consume_one and stalls its session until MaxDeliveryCount
-  (not set in repo); transient dispatch errors are dead-lettered at once; no DLQ re-drive.
-Intake: dedup dict and case_id counter in process memory; no message_id on publish; no try
-  around publish; no content-hash dedup; no page-count check.
-Detection: no alert rules; Gateway logs via logging.basicConfig; agent cores print.
-Registry quarantine status is built (registry_svc domain/lifecycle.py:L10-L14); the
-  quarantined_version_pin gate is not.
+No RetryPolicy anywhere -> Temporal default (unlimited, 1 s doubling to 100 s) once an orchestrator
+  exists. Raised bad input would loop. No max_concurrent_activities (SDK default 100 slots).
+LLM errors swallowed (segmentation per region, logo empty analysis, ntdc fails open). No circuit
+  breaker, no Retry-After. MAX_PAGES 20 stops silently; DI bills every page.
+broker_clients: every HTTP error raised and retried; attempt=1 hard-coded.
+error-taxonomy.json: 6 codes, no retryable field, used only inside vendor-kit.
+Cell Router: redelivery hits DuplicateCaseError; sweep cannot repair orphans; 11 metrics, none recorded.
+Gateway: MissingCaseId stalls a session; transient errors dead-lettered at once.
+Intake: dedup and case-id counter in memory; no message_id; no page-count check.
+No alert rules. Registry quarantine status built; quarantined_version_pin gate not.
 
 ## LLM layer (13)
-Call sites (all called directly, not through brokers or UAIS):
-  segmentation - GPT-4.1 line mapping with character offsets (up to 6 concurrent, 120 s),
-    GPT-4.1 judge (one call per mapping, EVAL_SEGMENTATION true), gemini-embedding-001 on
-    Vertex AI (batch 64; silently falls back to local hash embeddings if init fails,
-    pipeline.py L3623-L3628), Azure DI OCR;
-  logo - gpt-4o vision, json_object, temperature not set (API default 1.0), fallbacks
-    gpt-4.1 and o4-mini; ntdc - GPT-4.1 through a hard-coded dev proxy URL, temperature 0,
-    two rule prompts; bisu - gemini-3.5-flash on Vertex AI, temperature not set.
-BISU review prompt cannot render: .format() on a template with literal JSON braces raises
-  KeyError; caught per page, so every candidate issue is kept (llm_false_positive_filter.py
-  L567-L600, L201-L208).
-Prompts: hard-coded fallbacks in core; step_config.prompt_text overrides; logo and bisu try a SQL
-  prompt library (helix_prompt_library) with no backing connector; Registry prompt_versions has
-  no reader; prompt id, version and hash are not recorded per run.
-Credentials: AZURE_OPENAI_API_KEY; a no-auth fallback to a hard-coded dev translation-service
-  host (config.json FASTAPI_BASE_URL); service-account key-file paths in committed config;
-  the UAIS connector (prototype, unused) fetches one OAuth token and never refreshes it.
-UAIS staging report 2026-10-19: gpt-5.4, gpt-4.1, gpt-4.1-mini, text-embedding-3-large PASS;
-  gemini-3.5-flash and gemini-embedding-001 FAIL (HTTP 500).
-Judge: strict_accuracy = correct / judged with errored rows dropped; same GPT-4.1 as the mapper.
-Prices in code: GPT-4.1 $2 in / $8 out per 1M tokens; Gemini embedding $0.15 per 1M;
-  DI $10 per 1,000 pages (a 20-page pair = $0.40 of DI). No sample cost report.
-Evaluation: 33 metric functions, 24-entry catalog (evaluation_framework/); no gold set;
-  threshold origin unknown. ADR 0007: regulated translation stays with human MCS.
+segmentation: GPT-4.1 mapping with character offsets + GPT-4.1 judge + gemini-embedding-001
+  (silent fallback to hash embeddings) + Azure DI. logo: gpt-4o vision, temperature unset.
+  ntdc: GPT-4.1 via hard-coded dev proxy, temperature 0. bisu: gemini-3.5-flash; its review
+  prompt crashes on .format() with JSON braces, so every candidate issue is kept.
+Prompts hard-coded; no prompt version or hash per run. Credentials: env keys, a no-auth dev
+  fallback host, key-file paths in committed config. UAIS: Gemini routes fail in staging.
+Prices: GPT-4.1 $2 / $8 per 1M tokens; DI $10 per 1,000 pages. No gold set; thresholds unexplained.
 
 ## Deployment and scaling (07)
-Images: agents/Dockerfile uses the golden python:3.12-latest-dev base for build AND runtime,
-  uv sync --frozen with an unfrozen fallback, starts python -m agents.worker as PID 1, user
-  appuser, est. 1.5-2.5 GB. CI builds images only for identity-policy, trigger-intake and
-  trigger-gateway -> ACR (registryk8shelix-...azurecr.io:<run_number>), also on pull requests,
-  ACR login by username/password. Cell Router (python:3.11-slim, root, broken build context) and
-  Registry (no uv.lock, root, uv run at start) images have build defects; no CI for them or agents.
-Charts: agents-worker = 2 Deployments + 2 KEDA ScaledObjects; image ghcr.io/...:latest
-  IfNotPresent; no probes, secrets, workload identity, nodeSelector, PDB or grace period.
-  identity-policy = 1 replica, /healthz for both probes, envFrom Secret, optional workload identity.
-  OPA sidecar library chart has no consumer. No chart for intake, gateway, cell router, registry,
-  Temporal or orchestrator. Deploy = manual helm from a laptop.
-Pools (base/dev/staging/prod): det replicas 1/1/2/4, threads 32/32/40/64, KEDA threshold
-  10/8/15/25, max 40/20/60/120; llm replicas 1/1/2/3, threads 64/48/72/96, threshold 5/4/6/10,
-  max 60/30/80/150; requests det 500m/1Gi (limit 2/2Gi), llm 1/2Gi (limit 4/4Gi).
-  Prod llm pool idles: MCS uses neither llm activity.
-KEDA: Prometheus query on temporal_activity_task_queue_backlog at prometheus-operated.monitoring;
-  NOTHING emits that metric, an empty result counts as 0, so pools stay at their minimum; no
-  fallback; no HPA behavior. pollingInterval only matters for 0<->1; with min >= 1 the HPA reads
-  every 15 s and can double pods (or add 4) per 15 s.
-Shutdown: no SIGTERM handler and python runs as PID 1, so SIGTERM is ignored; the worker's 30 s
-  graceful shutdown never starts; the pod is SIGKILLed at the default 30 s.
-Gateway: one Service Bus session receiver per process, bound to one session for life, so each
-  pod drains one case's session. Intake: a new ServiceBusClient per publish; silent in-memory
-  fallback if the connection string is missing.
-Temporal hosting: local auto-setup:latest + Postgres 16 only. Design: dev = one Helm release,
-  Postgres B2s, 512 shards; prod = per-role Deployments, Managed Cassandra (RF 3), Elastic
-  visibility, 4k-16k shards per cell, a namespace per tenant (code uses one per environment).
-Azure: ACR exists (CI pushes); AKS not provisioned (infra/README); no Bicep. Designed node pools
-  system / platform-services / orchestrator / sandboxed; cluster autoscaler scale-down 10 min at
-  0.5 use. No provider quotas written anywhere. DI and Vertex AI are missing from the stack docs.
-Option A: one shared Deployment for all internal agents (temporary); code already has two latency
-  pools; Option B = one Deployment and queue per agent.
-Load test: closed loop, 25 callers, payload points at a /tmp file no pod has; no results.
+CI builds images for identity-policy, trigger-intake, trigger-gateway only (also on pull requests,
+  ACR password login). Charts: agents-worker and identity-policy only. Deploy = manual helm.
+Agents image: build-tools base at runtime, latest tag, ~1.5-2.5 GB, python as PID 1 with no
+  SIGTERM handler (graceful shutdown never starts). No probes, secrets or workload identity.
+Pools (prod): det 4-120 replicas, 64 threads, KEDA threshold 25; llm 3-150, 96 threads, 10.
+KEDA metric temporal_activity_task_queue_backlog has NO emitter -> pools never scale.
+Gateway session receiver bound to one session per process. Intake opens a client per message.
+Temporal: local auto-setup only; design = per-role Deployments, Cassandra, 4k-16k shards per cell.
+
+## Decisions (15)
+33 ADRs, all accepted; component specs still Proposed (pending-decisions #1).
+Status: 5 built or respected (0004, 0011, 0017, 0032, 0033), 16 partly, 9 not built
+  (0003, 0006, 0009, 0018, 0021, 0023, 0024, 0025, 0031), 3 scope-only (0001, 0002, 0007).
+  Full table: 15 Q1. Verdicts on the 8 most challengeable: 15 Q2.
+Families: scope (0001 0002 0004 0006 0007); substrate (0013 0014 0016 0017 0020 0024);
+  trust and PHI (0015 0018 0019 0021 0025 0026 0027 0030 0033); versioning
+  (0005 0008 0010 0012 0022); execution and humans (0003 0009 0011 0023);
+  ingress (0028 0029 0031 0032).
+Registry lifecycle: active -> draining | quarantined; draining -> retired | quarantined;
+  quarantined and retired are terminal (registry_svc domain/lifecycle.py:L10-L21). Retirement guard
+  asks every cell for in-flight pins and fails closed (retirement_guard.py:L40-L57). Owner-only
+  edit check (ADR 0010) not found in _catalog.py.
+Review 2026-10-06: findings 3, 4, 6, 7 fixed; 1 (token stub), 2 (brokers optional),
+  5 (custom mode skips persist_artifacts), 8 (failed envelope not re-validated) open.
+Pending decisions open: #1 ratification, #4 retention floors, #6 Azure subscriptions, #7 mock POC
+  spec, #10 PHI Broker key contract, #11 Cell Router .proto, #12 Lane A migration,
+  #13 unauthenticated intake, #14 DNS rebinding in pull mode.
+Sound decision, weak code: 0019 (paths, values in history), 0022 (no pin check), 0015 (direct keys,
+  broker flags default False), 0016 (Azure-only, yet Vertex AI in code), 0024 (one shared
+  Deployment), 0018 (static token), 0029 (in-memory counter), 0021/0030 (key stub),
+  0012 (bindings unread), 0032 (auth check off).
+No ADR covers model quality, evaluation, retry and timeout ownership, or alerting.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
 Reuse policy REJECT_DUPLICATE; workflow execution and run timeout 30 d; task timeout 10 min
-Designed retry (docs only, docs/AGENT_INVOCATION_UNIFIED_FLOW.md Phase 2): initial 1000 ms,
-      backoff 2.0, max attempts 3, start-to-close 60000 ms, heartbeat 30000 ms
-MCS SLA: end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
+Designed retry (docs only): initial 1000 ms, backoff 2.0, max attempts 3, start-to-close 60 s,
+  heartbeat 30 s. MCS SLA end_to_end 1440 min, per_step 480 min. Max upload 25 MiB.
 Designed scale: 1B+ runs/year, ~32 starts/s average, 650-950 peak; p95 < 2 s deterministic
-      step, < 8 s AI step (framework spec: 1.5 s and 6 s).
-Broker HTTP timeout 20 s; broker URLs default to localhost:8081 / 8082.
-
-## Design decisions already summarised
-00t part 10: spec 2.2 (Little's Law, Cassandra, dehydrate), ADR 0011, ADR 0019.
-01 sections 7.9 and 9: ADR 0004, 0006, 0012, 0020, 0023.
-02 sections 3 and 9: ADR 0011 in practice (logo loop), ADR 0019 gaps (paths, values in history).
-04 P and B1: ADR 0022 (recall half built), ADR 0029, the error taxonomy.
-13 section 10 Q6: ADR 0007; 13 section 3: ADR 0015 applied to model access.
-07 Part B, D7, D9 and Q7: ADR 0013, 0014, 0016, 0020, 0024; Option A vs B.
+  step, < 8 s AI step.
 
 ## Agent result envelope
 {status: success | needs_gate | failed, result, produces_artifacts, gate_signals,
- confidence, errors, sla, audit_entry}
-Business failures are RETURNED as failed envelopes (Temporal sees success, no retry).
-Broker errors are RAISED (Temporal retries).
+ confidence, errors, sla, audit_entry}. Business failures RETURNED; broker errors RAISED.
 
-## MCS workflow (services/MCS_workflow_config_v1.json, config only, nothing reads it)
-detect-lang-agent -> segmentation-agent -> validation-agent -> annotate-agent
-wired by input_bindings.*.producer; annotate-agent hitl_enabled, SLA 1-4 h, escalation 0.5 h.
-Domain: regulated English<->Spanish CMS member materials; MCS = human translation function.
+## MCS workflow (config only, nothing reads it)
+detect-lang-agent -> segmentation-agent -> validation-agent -> annotate-agent;
+annotate-agent hitl_enabled. Domain: regulated English<->Spanish CMS member materials.
 
 ## Docs vs code
-Start hop: gRPC in ADR 0031, HTTP /start in code; neither exists.
-Task queues: {cell_id}:{tenant_id}:activities in docs; orchestrator-platform and
-core-agents-* in code. AGENTS.md section 5 is out of date.
-File paths in docs/AGENT_INVOCATION_UNIFIED_FLOW.md are pseudo-code.
-
-## Delivery
-Helm charts: identity-policy, agents-worker only.
-CI: identity-policy (3 workflows), trigger-gateway (2), trigger-intake (2); images pushed on
-pull requests too. No CI for agents, registry, cell router. No CD.
+Start hop: gRPC in ADR 0031, HTTP /start in code; neither exists. Task queues differ between
+docs and code. AGENTS.md section 5 is out of date. AGENT_INVOCATION_UNIFIED_FLOW.md paths are
+pseudo-code.
 ```
 
 ## Corrections to finished files
@@ -490,6 +391,24 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 **How to answer "How is it deployed, and how does it scale?" in 60 seconds**
 
 "The design is a cell-based AKS platform: self-hosted Temporal per cell on Cassandra, a namespace per tenant, and KEDA-scaled worker pools split by latency class. What is built is thinner: Dockerfiles for most services, CI images for three, Helm charts for two, and no deployment pipeline. In the scaling path I found three defects I would fix first. KEDA reads a backlog metric that nothing publishes, so the pools never grow; I would switch to KEDA's Temporal scaler with a fallback. Workers ignore SIGTERM because Python runs as PID 1 with no handler, so every scale-down kills in-flight work; I would add the handler, a grace period above the longest activity, and heartbeats. And the trigger gateway binds each pod to a single session, so each pod handles one case. On capacity, Little's Law says the design's peak needs more pods than the cap, but the model quota and OCR cost run out long before pods do."
+
+**15-tradeoffs.md — corrections**
+
+- Section 4 repeats 00's error "10+ runs a year". The design figure is 1B+ runs a year.
+- Section 7's code blocks are garbled: one snippet is pasted twice and two fences never close. Ask Copilot in the same chat to repair section 7 only.
+- Q5 says review finding 7 (red test suite) was fixed during the review, while 00 and 02 said the suite was not green. Check the review file's lines 20–31 before you claim in an interview that the tests pass.
+- "Built" for ADR 0004 and 0017 means the rule is followed, not that code implements it. Say "respected".
+- Q8 misses one live violation: ADR 0016 says Azure-managed services only, yet segmentation and bisu call Google's Vertex AI (13).
+
+**15 — gaps it missed** (my review)
+
+1. **The ADRs skip the areas where the code is weakest.** None covers model quality and evaluation (gold sets, thresholds, model pinning), retry and timeout ownership, or alerting. For an AI/ML role, that gap is your strongest point: the platform shape was decided carefully, the model layer was not.
+2. **No ADR is enforced by a test.** Each critical decision could carry a fitness function, an automated check that fails the build when the decision is broken. Examples: a test that fails if a workflow payload holds anything but references (ADR 0019), a lint that fails if agent code reads model keys (ADR 0015), a check that every activity name carries a version (ADR 0022).
+3. **Decisions ran ahead of the build.** 21 ADRs in about a month, with the orchestrator they assume still unbuilt. The fix is not fewer ADRs; it is writing each one with its enforcement and its build status.
+
+**How to answer "Tell me about a design decision you would challenge" in 60 seconds**
+
+"Helix has 33 ADRs, and they are honest: each names the rejected option and the cost. Three I would defend anywhere: patient data only by reference, never in workflow history; only brokers hold credentials; and pinned versions with a quarantine path. Those make a shared multi-tenant platform safe and auditable. Two I would challenge. Self-hosted Temporal with cells from day one: at about 32 starts a second, one cell or Temporal Cloud is enough to start, and cells can come later. And a single team approving vendor releases, which removes separation of duties for code that runs near patient data. The bigger lesson is sequencing: decisions ran ahead of enforcement, so the reference-only rule is already broken by local file paths. I would attach an automated check to every critical decision, so the build fails when someone breaks it."
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -875,9 +794,10 @@ Write the result to helix-study/07-deploy-scale.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Already known (FACTS, 04 B4, 07 D10 and Part A): no alert rules, Cell Router metrics never
+Already known (FACTS, 04 B4, 07 D10 and Part A, 15 Q1): no alert rules, Cell Router metrics never
 recorded, no telemetry in agents, Gateway logs via basicConfig, agent cores print; CI triggers,
-push on pull requests, ACR password login, run_number tags, image build defects.
+push on pull requests, ACR password login, run_number tags, image build defects; ADR 0016 picks
+push-based CD on GitHub Actions; ADR 0025 approval and its missing admission pipeline.
 Do not re-check these.
 
 Topic: Operating Helix - the designed observability and audit, alerts, CI checks and supply chain.
@@ -908,9 +828,11 @@ Answer:
 8. Each GitHub workflow: what it tests and checks (lint, unit tests, OPA tests, scans,
    signing), as one table.
 9. The setup-opa action and the three identity-policy workflows as one policy pipeline.
-10. Supply chain: SBOM, signing, scanning, base-image policy, CODEOWNERS - designed vs built.
-    What stops a bad change from reaching production today?
-11. Status table: logging, metrics, tracing, dashboards, alerts, LLM observability,
+10. Supply chain: SBOM, signing, scanning, base-image policy, CODEOWNERS, the vendor admission
+    checks ADR 0025 relies on - designed vs built. What stops a bad change reaching production today?
+11. [IDEA] Which ADRs could be enforced by a CI check (a fitness function), and what each check
+    would test. Use 15 Q8 as the list of decisions the code already breaks.
+12. Status table: logging, metrics, tracing, dashboards, alerts, LLM observability,
     audit, CI, CD - [CODE] / [DOCS-ONLY] / [NOT FOUND].
 
 Write the result to helix-study/09-operations.md
@@ -975,8 +897,9 @@ Write the result to helix-study/13-llm-layer.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Refer to, do not repeat: 04 Q (broker error handling), 04 E (intake dedup),
-13 section 8c (credentials and endpoints), 07 Part A (charts, secrets, identity, users).
+Refer to, do not repeat: 04 Q (broker errors), 04 E (intake dedup), 13 section 8c (credentials),
+07 Part A (charts, secrets, identity, users), 15 Q1 and Q8 (status of every security ADR).
+Do not re-summarise ADRs; open one only when a question needs a detail 15 does not give.
 
 Topic: Security in Helix - identity policy, brokers, capability tokens, PHI and where it goes.
 
@@ -989,7 +912,6 @@ Read:
 - services/trigger_intake_svc/src/trigger_intake_svc/config.py and api/status.py (auth only)
 - docs/spec/*identity-policy-design*, *trust-boundary-sandbox-brokers-design*,
   *memory-broker-design* (decisions and flows only; include the LLM Broker redaction design)
-- docs/adr/ 0015, 0018, 0019, 0021, 0024, 0026, 0030, 0033 (Decision only)
 - docs/implementation/pending-decisions.md (rows 10-14)
 
 Answer:
@@ -997,8 +919,8 @@ Answer:
    where OPA runs, one real Rego rule explained line by line.
 2. All five brokers: what each brokers, and whether it is built, schema only or empty.
 3. No ambient authority (ADR 0015) in simple words, with one attack it stops.
-4. Capability tokens: who mints them, claims inside, lifetime, header transport
-   (ADR 0026), and what the memory broker checks today.
+4. Capability tokens: who mints them, claims inside, lifetime, header transport,
+   and what the memory broker checks today.
 5. Content References are unsigned today: what attack does that allow, and what
    would signing fix?
 6. Where PHI rests today (local disk under /tmp, logs, Temporal history, in-memory blobs)
@@ -1006,15 +928,17 @@ Answer:
 7. Which external providers receive document content today (Azure OpenAI, Vertex AI,
    Azure DI, the dev proxy hosts)? Is any redaction applied before a call? Which agreement,
    setting or doc in the repo covers sending PHI to them? [NOT FOUND] if none.
-8. Crypto-shredding, retention and legal hold (ADR 0021) in plain words, and the
-   phi_broker tables that support them.
+8. Crypto-shredding, retention and legal hold in plain words, and the phi_broker tables
+   that would support them once the key stub is replaced.
 9. Row-level security: which tables use it, and how app.tenant_id is set.
 10. Intake auth off by default, unauthenticated status endpoint, DNS-rebinding gap
     in pull mode: each risk in simple words.
 11. Cluster-level security: Kubernetes Secrets made by hand vs Key Vault CSI, workload identity
     gaps, containers running as root, securityContext, NetworkPolicy and namespace isolation
-    for vendor pods (ADR 0024) - designed vs present.
-12. Security controls designed but not built: list, ranked by risk.
+    for vendor pods - designed vs present.
+12. Vendor release approval by one team (ADR 0025): which automated checks are meant to
+    replace a second approver, and which of them exist?
+13. Security controls designed but not built: list, ranked by risk.
 
 Write the result to helix-study/10-security.md
 ```
@@ -1023,29 +947,28 @@ Write the result to helix-study/10-security.md
 
 ```text
 Follow #file:helix-study/STYLE.md. Known facts: #file:helix-study/FACTS.md.
-Refer to, do not repeat: 04 P (recall and quarantine) and 02 Q9 (versions).
+Refer to, do not repeat: 04 P (recall and quarantine), 02 Q9 (versions), 15 section 5 and
+Q1 (ADR 0005, 0008, 0010, 0022, 0025, 0027 status and the version lifecycle).
 
-Topic: The platform catalog - Registry, version pinning, and the vendor kit.
+Topic: Registry internals and the vendor kit - what 15 did not cover.
 
 Read:
-- services/registry_svc/src/registry_svc/ (routers, store, events, domain) and its migrations
+- services/registry_svc/src/registry_svc/ (routers, store, events) and its migrations
 - vendor-kit/ (schemas, src/helix_vendor_kit/conformance, harness, reference_agent -
   entry files only)
 - docs/vendor-integration/vendor-development-kit-technical-guide.md (sections 1-4)
-- docs/adr/ 0002, 0005, 0008, 0010, 0018, 0025, 0027 (Decision only)
 
 Answer:
 1. Registry endpoints table: method, path, purpose. Catalog tables and key columns.
-2. resolve-pins: input, output, rules. How a case gets fixed versions of agents,
-   prompts, rules and connectors.
-3. Explicit repinning, no auto-adopt (ADR 0008): why safety over freshness.
+2. resolve-pins: input, output, rules, with one worked request and response.
+3. Owner-only edits (ADR 0010): is ownership checked on any write path? Show the code
+   or [NOT FOUND].
 4. Registry events on Service Bus (registry-events): which events, and who consumes them.
-5. Shared rule library vs a BRMS (ADR 0005); shared library references (ADR 0010).
+5. Caching: what Redis holds, how it is invalidated, and what happens when Redis is down.
 6. Vendor kit: the four schemas, SDK, conformance tests, harness and reference agent -
-   what each does.
-7. Vendor onboarding from code to production, every gate (ADR 0025, 0027).
-8. Internal agent vs vendor agent: invocation differences, as a table.
-9. [IDEA] What it would take for a pin to actually select the code that runs
+   what each does, and what a vendor must pass before submission.
+7. Internal agent vs vendor agent: invocation differences, as a table.
+8. [IDEA] What it would take for a pin to actually select the code that runs
    (versioned activity names, Worker Versioning, image digests).
 
 Write the result to helix-study/12-catalog-vendors.md
@@ -1103,7 +1026,8 @@ Where a study file conflicts with CORRECTIONS.md, CORRECTIONS.md wins.
 Read only: sections 1, 4, 9 and 10 of each numbered file that uses STYLE's shape; the
 interview questions of 00t-temporal-primer.md; from 04-failure-recovery.md the "Interview
 answer" lines, B5, B6 and its Interview Q&A; from 07-deploy-scale.md section 1, the Part C
-table, D5, D6 and its Interview Q&A. Nothing else.
+table, D5, D6 and its Interview Q&A; from 15-tradeoffs.md section 1, Q2, Q7, Q8 and the
+CTO follow-ups. Nothing else.
 
 Write:
 1. 30-second pitch: what Helix is, why it is built this way, and its honest status
@@ -1113,8 +1037,9 @@ Write:
 3. One Mermaid diagram of the whole system, max 15 boxes, built vs designed marked.
 4. The 30 hardest interview questions across all files: 3-5 sentence answers,
    one file reference each.
-5. 60-second answers to "How does your system survive failures?" and
-   "How is it deployed, and how does it scale?"
+5. 60-second answers to: "How does your system survive failures?", "How is it deployed,
+   and how does it scale?", "How do you know your LLM output is good?" and
+   "Tell me about a design decision you would challenge."
 6. Numbers I can quote: real values only, with source.
 7. Do-not-claim list: everything [DOCS-ONLY] or [NOT FOUND], plus every item in CORRECTIONS.md.
 8. Ten trade-off one-liners: "We chose X over Y because Z; the cost is W."
