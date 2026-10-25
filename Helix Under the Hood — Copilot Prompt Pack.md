@@ -39,7 +39,15 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Done |
 | 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Done |
 | 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers, cluster security | Sonnet, medium | Done |
-| 09 | 09-observability.md | Observability and debugging: inventory, 7 drills, target design | Opus, medium | Must, next |
+| 09 | 09-observability.md | Observability and debugging: inventory, 7 drills, target design | Opus, medium | Must |
+| 02a | 02a-agent-ntdc.md | How ntdc finds wrong numbers, dates, times, currencies | Sonnet, high | Must |
+| 02b | 02b-agent-logo.md | How logo finds missing, moved or altered logos | Sonnet, high | Must |
+| 02c | 02c-agent-bisu.md | How bisu finds lost bold, italic, underline, size | Sonnet, high | Must |
+| 02d | 02d-agent-validation.md | How validation runs and merges the three checkers | Sonnet, high | Must |
+| 02e | 02e-agent-annotate.md | How annotate turns findings into a marked-up PDF | Sonnet, high | Must |
+| 02f | 02f-agent-detect-lang.md | How detect-lang decides the languages | Sonnet, medium | Should |
+| 02g | 02g-agent-translation-review.md | The all-in-one activity and how it fails | Sonnet, medium | Should |
+| 02z | 02z-agent-collaboration.md | How the agents work together; error propagation; failure matrix | Opus, medium | Must, after 02a–02g |
 | 12 | 12-catalog-vendors.md | Registry internals, version pinning, vendor kit | Sonnet, medium | If time |
 | 16 | 16-cheat-sheet.md | Pitch, hardest questions, do-not-claim list | Opus, medium | Must, last |
 
@@ -629,6 +637,252 @@ Answer:
 Write the result to helix-study/02-agents-layer.md
 ```
 
+### 02a–02z — Agent deep dives, one agent at a time
+
+02 explains how agents are built and wired, not how each one decides. These prompts open each agent's `core/` and explain its algorithm, its verdict logic, its edge cases and how it fails. Segmentation is skipped because you wrote it; the collaboration prompt (02z) still maps the outputs every other agent reads from it. Run one prompt per new chat, in table order, then 02z last.
+
+Setup once: paste this block into `helix-study/AGENT-DIVE.md`. It is the shared shape for every agent file, so each agent prompt stays short.
+
+```text
+# Agent deep dive - shape and rules
+Use with STYLE.md (language and truth rules) and FACTS.md. This shape replaces STYLE's 12 sections.
+
+## Do not repeat
+02-agents-layer.md sections 4c, 7 and 8a (folder anatomy, wrapper, every gate rule and threshold),
+04-failure-recovery.md (failure scenarios), 13-llm-layer.md (model call sites, prompts, credentials).
+Refer to them by section.
+
+## How to read the agent
+- Start at activity.py and follow the call graph into mappers.py and core/, in the order the code runs.
+- Read every core function on that path fully. Skip tests, notebooks and unused helpers, but list them.
+- Example values: invent realistic inputs where needed and tag them [EXAMPLE]. Every code path,
+  rule, threshold and constant must be real and cited with file:line.
+
+## Shape
+1. One-line answer: what this agent decides.
+2. Altitude 30,000 ft: the problem it solves for a human reviewer, in plain words, with one
+   real-life example of a defect it catches.
+3. Inputs and outputs: every input field and where it comes from (which agent or trigger); every
+   output field and file, and who reads it next.
+4. The algorithm, level by level:
+   4a. 10,000 ft: the stages in order, one line each.
+   4b. 1,000 ft: for each stage - what it does, why, how (rule, heuristic, library or model),
+       key thresholds and constants, file:line.
+5. The decision: exactly how the agent decides "correct" vs "defect" - normalisation, matching,
+   comparison rules, tolerances, scoring, severity, and the LLM's role (when it is called, what it
+   is asked, how its answer changes the verdict, what happens when it fails).
+6. Worked example: one [EXAMPLE] input traced through every stage with concrete values, ending in
+   the exact output fields and gate signals.
+7. Edge cases: 8-12 tricky inputs and what the code does with each (cite the branch). Mark each
+   handled, mishandled or unhandled.
+8. Diagram: one Mermaid flowchart of the algorithm, max 15 boxes.
+9. Failure behaviour: every way this agent can fail (bad input, missing file, empty or scanned page,
+   model timeout, 429, malformed model output, exception inside a sub-step). For each: what the code
+   does (raise, return failed, swallow), the effect on this agent's output and on the next agent,
+   and whether 04 covers it ("covered: 04 X" or "NEW").
+10. Accuracy risks: where it raises false alarms and where it misses real defects, with the code
+    reason. Then [IDEA] fixes.
+11. Interview Q&A: 5 questions an interviewer could ask about this agent, 3-5 sentences each.
+12. Glossary (new terms only, max 10) and Files read (one line).
+```
+
+**02a — ntdc (numbers, dates, times, currencies)**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: ntdc-agent (Numbers, Dates, Times, Currencies).
+Folder: agents/src/agents/activities/ntdc_agent/ - activity.py, mappers.py, contract/, and all of
+core/NTDC_Agent/ (including rule_validations.py, llm.py and AGENT_FLOW.md).
+
+Focus questions (answer them inside the shape):
+- How are numbers, dates, times and currencies found in source and target text: regex, a parser,
+  a library, the LLM? Show the patterns or functions.
+- How are values normalised across English and Spanish: decimal comma vs point, thousand separators,
+  date order and month names, 12-hour vs 24-hour time, currency symbol position, words vs digits?
+- How is each source value paired with its target value: segmentation results (which files and
+  fields), position, or value matching? What happens when the counts differ?
+- Each rule in rule_validations.py: what it checks, its severity, and an [EXAMPLE] that triggers it.
+- What makes a finding "critical"? How are CDER, F0.5 and FDR computed here, and from which counts?
+- When is needs_llm_review set, what do the two LLM prompts decide, and what happens per rule when
+  the LLM call fails (fail-open, 04 H and J)?
+- What exactly goes into manifest_json_path, and who reads it next?
+
+Write the result to helix-study/02a-agent-ntdc.md
+```
+
+**02b — logo**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: logo-agent.
+Folder: agents/src/agents/activities/logo_agent/ - activity.py, mappers.py, contract/, and
+core/logo_agent.py read fully in call order.
+
+Focus questions:
+- How are logos and images found in each PDF: embedded image objects, rendered page regions,
+  layout blocks? What counts as a "block"?
+- How are source and target pages paired when page counts differ, and how are source blocks matched
+  to target blocks (position, size, hash, embedding, or the vision model)?
+- The deterministic checks before the model (compare_logo_placement and others): what is compared,
+  tolerances and units.
+- The vision step: what the two images look like (red numbered boxes), what the model returns per
+  block, and how match_confidence_score and position_difference become a verdict and a severity.
+- How confidence, the recall proxy and the FDR proxy are computed from the results.
+- The model fallback list: when it moves to the next model, and what gets recorded.
+- Output files and fields (downstream_json_path), and who reads them next.
+
+Write the result to helix-study/02b-agent-logo.md
+```
+
+**02c — bisu (bold, italic, underline, font size)**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: bisu-agent.
+Folder: agents/src/agents/activities/bisu_agent/ - activity.py, mappers.py, contract/, and
+core/BISU-agents/ (the runtime pipeline modules under src/, configs/thresholds.json,
+review/llm_false_positive_filter.py).
+
+Focus questions:
+- How is formatting extracted from each PDF: font flags and font names (bold, italic), drawn lines
+  (underline), span sizes? Show the code.
+- How are source spans aligned to target spans: segmentation results (which files and fields),
+  word alignment, or position? What happens when one source span maps to several target spans?
+- What counts as a regression for each attribute (bold lost, italic added, underline missing,
+  size change beyond tolerance)? Severity rules and thresholds from thresholds.json.
+- The LLM false-positive filter: when it runs, what it is meant to remove, and what actually
+  happens today, given its prompt cannot render (13 section 9 item 1).
+- How confidence and the issue counts used by the gate rules are computed.
+- Output files (manifest_json_path) and fields, and who reads them next.
+- data_prep_v2.py: is it on the runtime path, and what does it do?
+
+Write the result to helix-study/02c-agent-bisu.md
+```
+
+**02d — validation (runs logo, ntdc and bisu)**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: validation-agent.
+Folder: agents/src/agents/activities/validation_agent/ (all files).
+
+Focus questions:
+- What it does itself vs what it delegates: input preparation shared by the three children,
+  the thread pool, ordering, timeouts.
+- How the three results are merged: merged_result, sub_agent_statuses, metrics_summary,
+  hitl_summary - field by field.
+- final_agent_output.json: its full structure, with an [EXAMPLE].
+- Partial failure: one child returns failed, one child raises, one child hangs (is there any
+  timeout?). Verify 04 N and add anything it missed.
+- Does it add decision logic of its own (de-duplication, severity roll-up, conflict handling
+  when two checkers flag the same text)?
+
+Write the result to helix-study/02d-agent-validation.md
+```
+
+**02e — annotate**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: annotate-agent.
+Folder: agents/src/agents/activities/annotation_agent/ (all files; core read fully).
+
+Focus questions:
+- How findings from logo, ntdc and bisu are loaded and merged into one list: schemas, field
+  mapping, de-duplication of overlapping findings, ordering.
+- How each finding's location becomes a mark on the translated PDF: coordinates, page mapping,
+  annotation type (highlight, box, note), colours or labels per agent.
+- What a human reviewer sees in the annotated PDF and in workflow_summary.json; the hitl_handoff
+  fields.
+- Why annotate emits no gate signals, and where the gate decision is meant to happen instead (01).
+- Missing or partial inputs: one manifest missing, validation failed, an empty findings list.
+
+Write the result to helix-study/02e-agent-annotate.md
+```
+
+**02f — detect-lang**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: detect-lang-agent.
+Folder: agents/src/agents/activities/detect_lang_agent/ (all files; core read fully).
+
+Focus questions:
+- How language is detected: library, model or Azure DI; from which text (first pages, all text,
+  metadata)?
+- Confidence: how it is computed, the 0.85 threshold, unsupported languages, mixed-language
+  documents, near-empty or scanned pages.
+- When Azure DI or the Connector Broker is used (image or zip inputs).
+- What the next agents use from its output (source_lang, target_lang), and what happens to them
+  if it is wrong.
+
+Write the result to helix-study/02f-agent-detect-lang.md
+```
+
+**02g — translation-review (the whole chain in one activity)**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+
+Agent: translation-review-agent.
+Folder: agents/src/agents/activities/translation_review_agent/ (all files).
+
+Focus questions:
+- The exact sequence it runs (segmentation, the validation children, annotate) and how it passes
+  data between them in-process.
+- How it differs from the MCS config's four separate steps: retries, timeouts, heartbeats, failure
+  isolation, queue choice (LLM pool plus the segmentation lock, 13 Q11).
+- Failure propagation: what happens when step 2 of 4 fails; which partial results are kept or lost.
+- Why it exists (docs or code comments), and when a team would use it instead of separate steps.
+
+Write the result to helix-study/02g-agent-translation-review.md
+```
+
+**02z — How the agents work together (run last)**
+
+```text
+Follow the Language and Truth rules in #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md.
+Read: helix-study/02-agents-layer.md (sections 4c and 7e); every helix-study/02?-agent-*.md file
+(sections 1, 3 and 9 only); services/MCS_workflow_config_v1.json; and segmentation's output
+writer (search pipeline.py for span_matching_results and final_output) to describe the files
+the other agents consume.
+
+Topic: How the agents work together to produce one reviewed document.
+
+Write:
+1. One-line answer and a 30,000 ft paragraph.
+2. Artifact map: every file or field passed between agents - producer, consumers, format, key
+   fields, PHI or not. Start with segmentation's outputs, since every checker depends on them.
+3. One Mermaid sequence diagram of one document pair through all agents, in MCS order.
+4. Error propagation: if segmentation pairs the wrong regions, what does each checker report?
+   If detect-lang is wrong? If one checker fails? Table: upstream fault, downstream effect, final output.
+5. Failure matrix: agent x failure type (bad input, missing file, model failure, exception, timeout),
+   each cell the effect on the case, marked "covered: 04 X" or "NEW".
+6. How the three checkers' findings become one decision for a human (annotate, hitl_handoff,
+   and the gates designed in 01).
+7. [IDEA] Five changes that would make the agents collaborate more safely (a shared finding
+   schema, references instead of paths, per-agent timeouts, a partial-result policy,
+   cross-checks between checkers).
+8. Interview Q&A: 6 questions on multi-agent collaboration, 4-6 sentences each.
+9. Files read (one line).
+
+Write the result to helix-study/02z-agent-collaboration.md
+```
+
 ## Prompt 04: failure and recovery
 
 Senior panels spend the most time here. The scenarios now match what exists: the agent wrapper, the gateway's dead-letter rules and Cell Router's sweep, plus the designed retry and recall rules.
@@ -1136,7 +1390,8 @@ interview questions of 00t-temporal-primer.md; from 04-failure-recovery.md the "
 answer" lines, B5, B6 and its Interview Q&A; from 07-deploy-scale.md section 1, the Part C
 table, D5, D6 and its Interview Q&A; from 15-tradeoffs.md section 1, Q2, Q7, Q8 and the
 CTO follow-ups; from 09-observability.md section 1, the Part A table, the [IDEA] lines of
-Part D, Part E items 1, 7 and 8, and its Interview Q&A. Nothing else.
+Part D, Part E items 1, 7 and 8, and its Interview Q&A; from each 02?-agent-*.md file
+sections 1, 5 and 11; from 02z-agent-collaboration.md sections 2, 4 and 8. Nothing else.
 
 Write:
 1. 30-second pitch: what Helix is, why it is built this way, and its honest status
@@ -1149,11 +1404,14 @@ Write:
 5. 60-second answers to: "How does your system survive failures?", "How is it deployed,
    and how does it scale?", "How do you know your LLM output is good?", "How do you secure
    an agent platform that handles patient data?", "How would you debug a wrong result in
-   production?" and "Tell me about a design decision you would challenge."
-6. Numbers I can quote: real values only, with source.
-7. Do-not-claim list: everything [DOCS-ONLY] or [NOT FOUND], plus every item in CORRECTIONS.md.
-8. Ten trade-off one-liners: "We chose X over Y because Z; the cost is W."
-9. Gaps I can discuss honestly, and how I would close the top 3.
+   production?", "How do your agents work together?" and "Tell me about a design decision
+   you would challenge."
+6. One paragraph per checker agent (ntdc, logo, bisu) that I can say out loud: how it decides
+   a defect, in plain words.
+7. Numbers I can quote: real values only, with source.
+8. Do-not-claim list: everything [DOCS-ONLY] or [NOT FOUND], plus every item in CORRECTIONS.md.
+9. Ten trade-off one-liners: "We chose X over Y because Z; the cost is W."
+10. Gaps I can discuss honestly, and how I would close the top 3.
 
 Write the result to helix-study/16-cheat-sheet.md
 ```
