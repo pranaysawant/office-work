@@ -39,8 +39,8 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 07 | 07-deploy-scale.md | Every deployable piece, the platform around it, scaling deep dive | Opus, medium | Done |
 | 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Done |
 | 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers, cluster security | Sonnet, medium | Done |
-| 09 | 09-observability.md | Observability and debugging: inventory, 7 drills, target design | Opus, medium | Must |
-| 02a | 02a-agent-ntdc.md | How ntdc finds wrong numbers, dates, times, currencies | Sonnet, high | Must |
+| 09 | 09-observability.md | Observability and debugging: inventory, 7 drills, target design | Opus, medium | Done |
+| 02a | 02a-agent-ntdc.md | How ntdc finds wrong numbers, dates, times, currencies | Sonnet, high | Must, next |
 | 02b | 02b-agent-logo.md | How logo finds missing, moved or altered logos | Sonnet, high | Must |
 | 02c | 02c-agent-bisu.md | How bisu finds lost bold, italic, underline, size | Sonnet, high | Must |
 | 02d | 02d-agent-validation.md | How validation runs and merges the three checkers | Sonnet, high | Must |
@@ -51,7 +51,7 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 12 | 12-catalog-vendors.md | Registry internals, version pinning, vendor kit | Sonnet, medium | If time |
 | 16 | 16-cheat-sheet.md | Pitch, hardest questions, do-not-claim list | Opus, medium | Must, last |
 
-If you are short on time or credits, skip 12 and go straight to 16 after 10 and 09: FACTS.md and 15 already cover the registry's status and decisions.
+Order from here: 02a to 02e first (the core of your story), then 02f, 02g and 02z, then 16. Skip 12 if you are short on time or credits: FACTS.md and 15 already cover the registry's status and decisions. Before 16, copy the Corrections section into `helix-study/CORRECTIONS.md`.
 
 The old prompts 03, 05, 06, 08, 11 and 14 are merged into the ones above, or already covered by 00.
 
@@ -139,12 +139,13 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in the 00, 00t, 01, 02, 04, 13, 07, 15 and 10 study files
+# Helix facts - verified in the 00, 00t, 01, 02, 04, 13, 07, 15, 10 and 09 study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
 Temporal concepts: 00t. Orchestrator and gates: 01. Agents, gate rules, thresholds: 02.
 Failures, retry budget, scorecard: 04. Models, prompts, evaluation: 13. Deployables, Azure
-platform, scaling: 07. All 33 ADRs, review, pending decisions: 15. Security: 10. (All in helix-study/.)
+platform, scaling: 07. All 33 ADRs, review, pending decisions: 15. Security: 10. Logging, metrics, tracing,
+audit, debugging drills: 09. (All in helix-study/.)
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -163,7 +164,8 @@ NOT FOUND:    production @workflow.defn (GenericOrchestratorWorkflow has no work
               alert rules anywhere, a RetryPolicy passed anywhere, a gold set,
               PHI redaction before model calls, CD, Bicep, a Temporal chart,
               any emitter of the KEDA backlog metric, provider quota numbers,
-              an automated check enforcing any ADR
+              an automated check enforcing any ADR, tracing,
+              dashboards, log shipping, custom search attributes
 
 ## Real request path today
 POST /intake -> Service Bus triggers-queue (session_id = case_id) -> Trigger Gateway
@@ -309,6 +311,35 @@ ADR 0025 admission checks (SBOM/CVE, image signing, Gatekeeper, canary, approval
 Intake: auth off by default; status endpoint unauthenticated; pull mode https only, no redirects,
   empty ALLOWED_DOMAINS, DNS-rebinding gap.
 Prompt injection from documents: not addressed anywhere.
+
+## Observability (09)
+Logs: only the Gateway (basicConfig, no timestamp) and identity-policy configure logging. Intake,
+  Registry, Cell Router (basicConfig sits under __main__; the container runs uvicorn) and the agents
+  worker configure nothing, so their INFO lines are dropped. Agent cores print with no case_id.
+  Segmentation calls basicConfig(filename=..., level=DEBUG, force=True) when LOGGING_ENABLED (true), so
+  the whole worker process then logs into the newest case's /tmp debug file. No redaction filter.
+  Unused StructuredLogger and RED class in helix_infrastructure_connectors/observability.
+Correlation: IDs travel only inside message bodies or the workflow_id string. No traceparent, no
+  Service Bus message_id, correlation_id or application properties, no memo or search attributes at
+  start; cases.correlation_id never written. Best per-case record today: Gateway trigger_events table.
+Metrics: Cell Router /metrics returns generate_latest() through FastAPI, so the body is a JSON string
+  Prometheus cannot parse; get_metrics() is called only in tests; no Temporal SDK Runtime telemetry.
+Traces: none. The vendor SDK forwards traceparent and prints flat "spans" with no parent ID.
+  TracingInterceptor appears in neither code nor docs.
+Model calls: segmentation prints tokens and cost and writes pipeline_cost_time_report.json in /tmp;
+  logo keeps requested and response model in _llm_debug; nothing leaves the pod; no case_id or prompt id.
+Envelope: audit_entry lacks workflow_id, run_id, attempt, tenant, agent version, model, prompt hash;
+  input_hashes always {}; failed envelopes have sla None; it lands only in Temporal history.
+  Gate signal metric_value and threshold are rounded to 2 decimals (0.8763 vs 0.88 shows
+  "0.88 lt 0.88"); evidence keeps 4 decimals.
+Audit: audit_log (phase intent|outcome, prev_hash, entry_hash, REVOKE UPDATE/DELETE from app_role) and
+  outbox tables only; outbox lacks created_at and published_at; no writer, hash code, poller, Event Hub
+  or Kusto.
+Designed: 12 business events + 18 SRE metrics via OTel to managed Prometheus; Arize behind the LLM
+  Broker with PHI swapped for references; SLO targets p95 < 2 s / < 8 s and 99.9% availability; no doc
+  designs search attributes or cardinality rules. The Fluent Bit vendor filter is an unvalidated sketch
+  with no real allow-list.
+No dashboards, alert rules, SLO measurement or log shipping.
 
 ## Key values
 case_id case_<YYYY>_<MM>_<DD>_<NNNNN>; workflow_id {tenant_id}:{workflow_type}:{case_id}
@@ -457,6 +488,27 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 **How to answer "How do you secure an agent platform that handles patient data?" in 60 seconds**
 
 "The principle is that agents hold no credentials and see no data by default. Brokers hold the keys. Each call carries a 30-second token bound to one agent, one case and one operation. Policy is signed code evaluated locally. Patient data travels only as references, and erasure works by destroying a per-case key. In Helix the policy pipeline is genuinely built: bundles are signed, verified on push and on every pull, and the rules fail closed. But most brokers are not built, so today agents send document text to model providers directly, with keys in their environment and no redaction, and one static token covers every call. Before real member data, I would turn on intake authentication, block egress from agent pods, put one key-holding proxy in front of the models, encrypt storage, and confirm an agreement with every provider. And because documents can carry prompt injection, the model only reports findings, code verifies them, and a human makes the decision."
+
+**09-observability.md — corrections**
+
+- E4's agent-results counter has no status label. It needs the envelope status (success, needs\_gate, failed), because Temporal counts a returned `failed` envelope as a successful activity (00t part 7). Alert A4, built on Temporal's failure counter, would miss every business failure. Count failures from the envelope, not from Temporal.
+- D1 and D7 treat Temporal history as the record that survives. History is deleted after the namespace's retention period, so a complaint weeks later needs the model-call record and the audit trail, which must outlive history. That is why E6 is not optional.
+- E10's one-week build order assumes a running cell and orchestrator; neither exists (07). Present it as "the order once one cell runs".
+- Exact metric names and Azure details tagged \[CONCEPT, verify\] (Temporal SDK series names, Container Insights tables, the PSI cut-off of 0.2) need checking. In an interview, say "schedule-to-start latency", not a series name.
+- "Log exception types, not messages" (E3) throws away debugging detail. A scrubbed message, or the full error in an access-controlled store, keeps both safety and detail.
+- Small fixes: the Interview Q&A heading is missing, and Q4's "logs stores response\_model" means logo.
+
+**09 — gaps it missed** (my review)
+
+1. **No black-box check.** A canary case — a tiny known document pair sent every few minutes through the real front door, with an alert if it does not finish — tests the whole path the way a customer does. Helix's real request path stops at a Registry 404 today; in a deployed system, only a canary would signal that before a customer did.
+2. **Reviewer decisions are free labels.** Each approve, override or correction says whether a gate rule was right. Recording a verdict per fired rule gives per-rule precision in production and a stream of new gold-set candidates. For an AI/ML role, this feedback loop is the strongest observability point you can make.
+3. **Input drift.** Page counts, language pairs, scanned vs digital pages and OCR confidence shift before output quality does. Watching inputs explains a quality drop early.
+4. **Observability costs money.** At design scale, sending every log line to Log Analytics is a real bill. Plan sampling for debug logs and a cheaper tier for verbose tables.
+5. **One view per case.** Debugging speed comes from a single "explain this case" view that joins history, logs, model calls and gate evidence by case ID, more than from extra dashboards.
+
+**How to answer "How would you debug a wrong result in production?" in 60 seconds**
+
+"I work in four moves: find the case by one ID, follow it through the workflow history and its trace, inspect the failing step — its logs, the model-call record, and the rule and threshold that fired — then add the signal that would have made it a five-minute job. In Helix today the first move already fails: no ID crosses the hops as a header, most services drop their info logs, the agents print without a case ID, and the one metrics endpoint returns JSON that Prometheus cannot read. The envelope in Temporal history has the gate signals, but not the model version or prompt hash, and its numbers are rounded, so a gate can read '0.88 below 0.88'. My first week would be one logging setup with IDs on every line, Temporal SDK metrics, a record for every model call with model version and prompt hash, and a stuck-case detector. Then a canary case every few minutes, because the best alert fires before a customer notices."
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -649,7 +701,8 @@ Use with STYLE.md (language and truth rules) and FACTS.md. This shape replaces S
 
 ## Do not repeat
 02-agents-layer.md sections 4c, 7 and 8a (folder anatomy, wrapper, every gate rule and threshold),
-04-failure-recovery.md (failure scenarios), 13-llm-layer.md (model call sites, prompts, credentials).
+04-failure-recovery.md (failure scenarios), 13-llm-layer.md (model call sites, prompts, credentials),
+09-observability.md (logging setup, cost reports, gate-number rounding).
 Refer to them by section.
 
 ## How to read the agent
@@ -679,7 +732,10 @@ Refer to them by section.
 9. Failure behaviour: every way this agent can fail (bad input, missing file, empty or scanned page,
    model timeout, 429, malformed model output, exception inside a sub-step). For each: what the code
    does (raise, return failed, swallow), the effect on this agent's output and on the next agent,
-   and whether 04 covers it ("covered: 04 X" or "NEW").
+   and whether 04 covers it ("covered: 04 X" or "NEW"), and how an operator would
+   notice it today (log line, file, envelope field, or nothing; see 09). Then list what the agent
+   prints, logs or writes for debugging, with file:line, and the 3 signals an on-call engineer would
+   most need from this agent [IDEA].
 10. Accuracy risks: where it raises false alarms and where it misses real defects, with the code
     reason. Then [IDEA] fixes.
 11. Interview Q&A: 5 questions an interviewer could ask about this agent, 3-5 sentences each.
@@ -871,12 +927,13 @@ Write:
 4. Error propagation: if segmentation pairs the wrong regions, what does each checker report?
    If detect-lang is wrong? If one checker fails? Table: upstream fault, downstream effect, final output.
 5. Failure matrix: agent x failure type (bad input, missing file, model failure, exception, timeout),
-   each cell the effect on the case, marked "covered: 04 X" or "NEW".
+   each cell the effect on the case and how it is detected today (09), marked "covered: 04 X" or "NEW".
 6. How the three checkers' findings become one decision for a human (annotate, hitl_handoff,
    and the gates designed in 01).
 7. [IDEA] Five changes that would make the agents collaborate more safely (a shared finding
    schema, references instead of paths, per-agent timeouts, a partial-result policy,
-   cross-checks between checkers).
+   cross-checks between checkers, a provenance record per finding: agent, rule,
+   model, prompt hash).
 8. Interview Q&A: 6 questions on multi-agent collaboration, 4-6 sentences each.
 9. Files read (one line).
 
