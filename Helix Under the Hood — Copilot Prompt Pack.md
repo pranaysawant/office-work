@@ -40,14 +40,14 @@ Paths come from your folder screenshots. Where a name was cut off, the prompt us
 | 15 | 15-tradeoffs.md | All 33 ADRs, the review, open decisions | Sonnet, high | Done |
 | 10 | 10-security.md | Policy service, brokers, tokens, PHI to providers, cluster security | Sonnet, medium | Done |
 | 09 | 09-observability.md | Observability and debugging: inventory, 7 drills, target design | Opus, medium | Done |
-| 02a | 02a-agent-ntdc.md | How ntdc finds wrong numbers, dates, times, currencies | Sonnet, high | Must, next |
-| 02b | 02b-agent-logo.md | How logo finds missing, moved or altered logos | Sonnet, high | Must |
-| 02c | 02c-agent-bisu.md | How bisu finds lost bold, italic, underline, size | Sonnet, high | Must |
-| 02d | 02d-agent-validation.md | How validation runs and merges the three checkers | Sonnet, high | Must |
-| 02e | 02e-agent-annotate.md | How annotate turns findings into a marked-up PDF | Sonnet, high | Must |
-| 02f | 02f-agent-detect-lang.md | How detect-lang decides the languages | Sonnet, medium | Should |
-| 02g | 02g-agent-translation-review.md | The all-in-one activity and how it fails | Sonnet, medium | Should |
-| 02z | 02z-agent-collaboration.md | How the agents work together; error propagation; failure matrix | Opus, medium | Must, after 02a–02g |
+| 02a | 02a-agent-ntdc.md | How ntdc finds wrong numbers, dates, times, currencies | Vectors only: Sonnet, medium | Done; vector pass optional |
+| 02b | 02b-agent-logo.md | How logo finds missing, moved or altered logos | A+C: Sonnet, high · B: Sonnet, medium | Must, next |
+| 02c | 02c-agent-bisu.md | How bisu finds lost bold, italic, underline, size | A+C: Sonnet, high · B: Sonnet, medium | Must |
+| 02d | 02d-agent-validation.md | How validation runs and merges the three checkers | A+C: Sonnet, high | Must |
+| 02e | 02e-agent-annotate.md | How annotate turns findings into a marked-up PDF | A+C: Sonnet, high | Must |
+| 02f | 02f-agent-detect-lang.md | How detect-lang decides the languages | A+C: Sonnet, medium | Should |
+| 02g | 02g-agent-translation-review.md | The all-in-one activity and how it fails | A+C: Sonnet, medium | Should |
+| 02z | 02z-agent-collaboration.md | How the agents work together; error propagation; failure matrix | Opus, medium | Must, after 02b–02g |
 | 12 | 12-catalog-vendors.md | Registry internals, version pinning, vendor kit | Sonnet, medium | If time |
 | 16 | 16-cheat-sheet.md | Pitch, hardest questions, do-not-claim list | Opus, medium | Must, last |
 
@@ -139,13 +139,13 @@ Version 2.1: lean shape, token rules that point to FACTS.md, and one-line \[IDEA
 Paste this into `helix-study/FACTS.md`. It holds everything 00 verified, with exact paths, so later prompts read only what they still need. Update it as each new file adds facts.
 
 ```text
-# Helix facts - verified in the 00, 00t, 01, 02, 04, 13, 07, 15, 10 and 09 study files
+# Helix facts - verified in the 00, 00t, 01, 02, 04, 13, 07, 15, 10, 09 and 02a study files
 Treat these as known. Do not re-read files just to re-confirm them.
 Read a listed file only when a question needs a detail that is not here.
 Temporal concepts: 00t. Orchestrator and gates: 01. Agents, gate rules, thresholds: 02.
 Failures, retry budget, scorecard: 04. Models, prompts, evaluation: 13. Deployables, Azure
 platform, scaling: 07. All 33 ADRs, review, pending decisions: 15. Security: 10. Logging, metrics, tracing,
-audit, debugging drills: 09. (All in helix-study/.)
+audit, debugging drills: 09. ntdc internals: 02a. (All in helix-study/.)
 
 ## Build status
 Built:        trigger_intake_svc, trigger_gateway_svc, cell_router_svc (bugs), registry_svc,
@@ -234,10 +234,32 @@ Handoff: local /tmp file paths; segmentation returns its mapping list by value i
 Contract activity_options are data only. Versions never compared; activity name = bare agent_id.
 Quality metrics are self-referential (align_f1, proxies, ECE default 0.0).
 
+## ntdc internals (02a)
+Pairing unit = segmentation region (page_<n>_mapped_regions.json: original_text, translated_text,
+  region_id, translated_bbox, original_bbox). No value-to-value pairing; value counts never compared.
+Detection: regex only, priority currency > time > numeric date > written date > number > word number
+  (detectors.py:L151-L231). Currency needs the symbol first; the number regex also takes phone numbers.
+Match: plain substring -> exact ("$5" passes inside "$50"); else digits-only -> reformatted; else
+  TF-IDF cosine -> tweaked (> 0.2) or missed (0). Only normaliser = digits_only; the Spanish profile's
+  separators are declared but never read. Unknown target language -> English profile, silently.
+16 rules (D1 D3-D7, N1-N4, C1-C3, T1 T3 T6) enforce a house style: keep MDY, "$" first, no space
+  before "%". N1, N2 and T3 test the whole region, so one "20 %" flags every number in it.
+Severity by type (currency, date, time high; number medium). Critical only via critical_rule_ids,
+  which no template sets, so NTDC_CRITICAL_CONFIDENCE_FLOOR never fires.
+LLM: only check_digit_word_form sets needs_llm_review (a digit > 20 absent from the target, or any
+  formatted number, including phone numbers copied exactly). The currency LLM check is unreachable.
+  On failure the N4 label is lost; a dropped number usually still ends "missed" and highlighted.
+Metrics: tp = exact + numeric_semantic + reformatted; fp = every issue row (reformatted counted in
+  both); fn = missed. They measure how dirty the document is. A number-free document gates.
+redirect_stdout around the whole run swallows ntdc's prints, including the LLM-failure warning, and
+  being process-wide also swallows sibling threads' prints inside validation.
+Manifest: <target_stem>_manifest_<ts>.json, one object per issue row; annotate reads page_number,
+  annotation_rects (fallback translated_bbox), type and comment.
+
 ## Failure behaviour (04)
 No RetryPolicy anywhere -> Temporal default (unlimited, 1 s doubling to 100 s) once an orchestrator
   exists. Raised bad input would loop. No max_concurrent_activities (SDK default 100 slots).
-LLM errors swallowed (segmentation per region, logo empty analysis, ntdc fails open). No circuit
+LLM errors swallowed (segmentation per region, logo empty analysis, ntdc's model check counts as a pass). No circuit
   breaker, no Retry-After. MAX_PAGES 20 stops silently; DI bills every page.
 broker_clients: every HTTP error raised and retried; attempt=1 hard-coded.
 error-taxonomy.json: 6 codes, no retryable field, used only inside vendor-kit.
@@ -249,7 +271,7 @@ No alert rules. Registry quarantine status built; quarantined_version_pin gate n
 ## LLM layer (13)
 segmentation: GPT-4.1 mapping with character offsets + GPT-4.1 judge + gemini-embedding-001
   (silent fallback to hash embeddings) + Azure DI. logo: gpt-4o vision, temperature unset.
-  ntdc: GPT-4.1 via hard-coded dev proxy, temperature 0. bisu: gemini-3.5-flash; its review
+  ntdc: GPT-4.1 via hard-coded dev proxy, temperature 0; only its digit/word prompt is reachable (02a). bisu: gemini-3.5-flash; its review
   prompt crashes on .format() with JSON braces, so every candidate issue is kept.
 Prompts hard-coded; no prompt version or hash per run. Credentials: env keys, a no-auth dev
   fallback host, key-file paths in committed config. UAIS: Gemini routes fail in staging.
@@ -414,14 +436,14 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 
 **How to answer "How does your system survive failures?" in 60 seconds**
 
-"Helix's design has the right building blocks: durable workflows, deterministic IDs and a quarantine model. The code that exists shows three failure patterns. Retries are unbounded, because no retry policy is set. Failures degrade silently, because LLM errors are swallowed and ntdc fails open. And handoff breaks across pods, because steps pass local file paths. My first three fixes would be: one shared activity-options helper with bounded retries, heartbeats and non-retryable input errors; typed LLM errors that turn into gate signals instead of empty results; and artifacts passed as Blob references. Then four alerts: retries rising, cases past their SLA, gate rate per rule, and dead-letter count."
+"Helix's design has the right building blocks: durable workflows, deterministic IDs and a quarantine model. The code that exists shows three failure patterns. Retries are unbounded, because no retry policy is set. Failures degrade silently, because LLM errors are swallowed and a failed model check counts as a pass. And handoff breaks across pods, because steps pass local file paths. My first three fixes would be: one shared activity-options helper with bounded retries, heartbeats and non-retryable input errors; typed LLM errors that turn into gate signals instead of empty results; and artifacts passed as Blob references. Then four alerts: retries rising, cases past their SLA, gate rate per rule, and dead-letter count."
 
 **13-llm-layer.md — corrections**
 
 - Section 1's "five model families, including an unnamed proxy model" muddles it. Say instead: two vendors — OpenAI models (GPT-4.1, gpt-4o and its fallbacks) through Azure or a proxy, and Google Gemini (embeddings, Flash) through Vertex AI — plus Azure DI for OCR, which is not an LLM. The "unnamed proxy model" is GPT-4.1 by the file's own table.
 - "Logo temperature not set (model default)": the API default is 1.0, the most random setting, on the call whose score drives logo gates. The fallback o4-mini accepts no temperature setting at all, so a fix must set it per model.
 - Q7: dropping errored rows from `strict_accuracy` is not neutral. In a 429 storm the judge drops the rows it failed on, which may be the hardest pairs, so accuracy can look better exactly when the run is worse. Report coverage beside accuracy.
-- Section 9 item 1 is right, but name the direction it fails: the broken BISU review keeps every candidate issue, the safe direction (more review work). ntdc fails the other way, open. Contrasting the two shows you understand fail-open vs fail-closed.
+- Section 9 item 1 is right, but name the direction it fails: the broken BISU review keeps every candidate issue, the safe direction (more review work). ntdc's model check fails the other way, open (02a: a dropped number usually still shows as missed; only the rule label is lost). Contrasting the two shows you understand fail-open vs fail-closed.
 
 **13 — gaps it missed** (my review)
 
@@ -509,6 +531,30 @@ Copilot's outputs are mostly accurate, but each has a few errors. Fix these in y
 **How to answer "How would you debug a wrong result in production?" in 60 seconds**
 
 "I work in four moves: find the case by one ID, follow it through the workflow history and its trace, inspect the failing step — its logs, the model-call record, and the rule and threshold that fired — then add the signal that would have made it a five-minute job. In Helix today the first move already fails: no ID crosses the hops as a header, most services drop their info logs, the agents print without a case ID, and the one metrics endpoint returns JSON that Prometheus cannot read. The envelope in Temporal history has the gate signals, but not the model version or prompt hash, and its numbers are rounded, so a gate can read '0.88 below 0.88'. My first week would be one logging setup with IDs on every line, Temporal SDK metrics, a record for every model call with model version and prompt hash, and a stuck-case detector. Then a canary case every few minutes, because the best alert fires before a customer notices."
+
+**02a-agent-ntdc.md — corrections it makes, and what to check**
+
+02a is strong: it ran the real code on synthetic text, quotes the patterns, and lists all 16 rules with code lines. Keep it. It corrects three earlier statements:
+
+- **The currency LLM check never runs.** Only the digit/word check sets the model flag. So 13's "one call per currency or number token" is wrong: calls go to number tokens only, including phone numbers copied exactly. 04 H's currency line describes code that cannot run.
+- **"ntdc fails open" overstates it.** When the model call fails, the N4 rule label is lost, but a dropped number usually still ends up `missed` and highlighted. Say "a failed model check counts as a pass", not "ntdc reports no problem".
+- **The worst silent failure is the matcher, not the LLM.** A plain substring test lets `$5` pass when the target says `$50`, and `1` pass inside `10`. That is the headline for interviews.
+
+Check before you quote:
+
+- "Retried forever" for raised errors applies once an orchestrator exists with Temporal's default policy (04 B1).
+- `reformatted` rows count in both tp and fp: a double count in the formula, not only a proxy.
+- `redirect_stdout` is process-wide. If bisu or logo also redirect stdout in their threads, the restore order can leave `sys.stdout` on the wrong writer. Ask 02c and 02d to check \[CONCEPT\].
+- The worked example's step numbers skip 4 (cosmetic).
+
+**02a — gaps** (my review)
+
+1. **No vector table.** Two runs prove the method, not the coverage. The optional vector pass in the 02a prompt section fixes this.
+2. **House style vs correctness.** The rules encode one client's style (keep MDY, `$` first, no space before `%`), while the Spanish profile's own separators are never read. In an interview, say "it checks a house style", and that a style belongs in configuration, not code.
+
+**How to answer "How does your number check decide a value is wrong?" in 60 seconds**
+
+"In the system I worked on, the checker used regular expressions to find typed values in each English region (currency, times, dates, numbers) and searched for each one inside the paired Spanish region. First a plain substring test, then a digits-only test, then about sixteen house-style rules: keep month-day order, keep the dollar sign first, no space before a percent sign. A model was asked only whether a digit-versus-word form was mirrored. Reading the code, I found three weaknesses. The substring test passes '$5' when the translation says '$50'. Some rules test the whole paragraph, so one '20 %' flagged every number in it. And the quality metrics counted found defects as false positives, so they measured how dirty the document was, not how accurate the checker was. My version parses every value with the target locale's rules, pairs values one to one, reports missing and extra values on both sides, and proves it with property tests that change one digit."
 
 ## Prompts 00–02: big picture, Temporal, orchestration, agents
 
@@ -693,79 +739,148 @@ Write the result to helix-study/02-agents-layer.md
 
 02 explains how agents are built and wired, not how each one decides. These prompts open each agent's `core/` and explain its algorithm, its verdict logic, its edge cases and how it fails. Segmentation is skipped because you wrote it; the collaboration prompt (02z) still maps the outputs every other agent reads from it. Run one prompt per new chat, in table order, then 02z last.
 
-Setup once: paste this block into `helix-study/AGENT-DIVE.md`. It is the shared shape for every agent file, so each agent prompt stays short.
+**Version 2.** Version 1 produced a deep 02a, so one run per agent can be enough. Version 2 keeps that and adds what 02a lacked: a test-vector table run through the real code, a function inventory, and minimums, so the larger agents (logo has a 1,478-line core) are not skimmed. The work is grouped into three passes:
+
+1. **Pass A — how it decides:** a full function inventory, every regex, table and threshold quoted, the algorithm stage by stage, and one decision table per check.
+2. **Pass B — proof:** three end-to-end traces and at least 20 test vectors run through the real functions on synthetic text, with the model switched off.
+3. **Pass C — failure and judgement:** failures, debugging signals, false alarms and misses tied to the vectors, and interview answers.
+
+Default: **one run doing Pass A and Pass C together**, then Pass B in a new chat for the three checkers (logo, bisu, and optionally ntdc's vector pass below). Split A and C into separate chats only if the output stops early twice. Do not redo 02a.
+
+Setup once: replace `helix-study/AGENT-DIVE.md` with this block, and create an empty `helix-study/scratch/` folder that you never commit.
 
 ```text
-# Agent deep dive - shape and rules
+# Agent deep dive v2 - shape and rules
 Use with STYLE.md (language and truth rules) and FACTS.md. This shape replaces STYLE's 12 sections.
+Each agent is written in up to three passes, each appended to the same file:
+  Pass A = sections 1-6 (how the code works and how it decides)
+  Pass B = sections 7-9 (traces, test vectors, edge cases)
+  Pass C = sections 10-14 (failures, debugging, accuracy, interview, files)
+Do only the pass you are asked for, then stop. If a prompt names no pass, do Pass A and Pass C
+together (sections 1-6 and 10-14) in one run.
+Spend the output on depth. A short, exact section beats a long, vague one.
 
 ## Do not repeat
 02-agents-layer.md sections 4c, 7 and 8a (folder anatomy, wrapper, every gate rule and threshold),
 04-failure-recovery.md (failure scenarios), 13-llm-layer.md (model call sites, prompts, credentials),
-09-observability.md (logging setup, cost reports, gate-number rounding).
-Refer to them by section.
+09-observability.md (logging setup, cost reports, gate-number rounding). Refer to them by section.
 
-## How to read the agent
-- Start at activity.py and follow the call graph into mappers.py and core/, in the order the code runs.
-- Read every core function on that path fully. Skip tests, notebooks and unused helpers, but list them.
-- Example values: invent realistic inputs where needed and tag them [EXAMPLE]. Every code path,
-  rule, threshold and constant must be real and cited with file:line.
+## Depth rules (a section that breaks one is incomplete)
+- Read before you write. Section 3 lists every function on the run path. A function that is not
+  in that table counts as unread, and you may not describe its behaviour.
+- Quote, do not paraphrase, every regex, lookup table (month names, currency symbols, word lists),
+  threshold and prompt that decides a verdict. For a long table, quote the first 10 rows and give
+  the row count.
+- Every claim about behaviour carries file:line. "Probably", "likely" and "seems" are allowed only
+  with [ASSUMPTION] and the reason.
+- No adjectives as findings ("robust", "comprehensive", "sophisticated"). Say what the code does.
+- Minimums: section 4 covers every stage; section 5 has one decision table per value type or
+  check; section 7 has 3 traces; section 8 has at least 20 vectors; section 9 at least 12 edge
+  cases. If the code is too small to reach a minimum, say so and why.
+
+## Running code (Pass B)
+- You may run code to observe behaviour. Write scratch scripts only in helix-study/scratch/.
+  Never edit repo code. Import the agent's functions directly.
+- No network and no model calls. Turn the agent's LLM switch off, or monkeypatch the model-call
+  function to raise, and record what the code then returns (this proves fail-open or fail-closed).
+- Test inputs are synthetic. Never copy text, names or numbers from real documents in the repo.
+  For PDF-based agents, build small PDFs in the script with PyMuPDF.
+- Tag a result you ran [RUN]. If a function cannot run without a service, tag it [NOT RUN] with
+  the reason, and give the result you expect from reading the code.
 
 ## Shape
-1. One-line answer: what this agent decides.
-2. Altitude 30,000 ft: the problem it solves for a human reviewer, in plain words, with one
-   real-life example of a defect it catches.
-3. Inputs and outputs: every input field and where it comes from (which agent or trigger); every
-   output field and file, and who reads it next.
-4. The algorithm, level by level:
-   4a. 10,000 ft: the stages in order, one line each.
-   4b. 1,000 ft: for each stage - what it does, why, how (rule, heuristic, library or model),
-       key thresholds and constants, file:line.
-5. The decision: exactly how the agent decides "correct" vs "defect" - normalisation, matching,
-   comparison rules, tolerances, scoring, severity, and the LLM's role (when it is called, what it
-   is asked, how its answer changes the verdict, what happens when it fails).
-6. Worked example: one [EXAMPLE] input traced through every stage with concrete values, ending in
-   the exact output fields and gate signals.
-7. Edge cases: 8-12 tricky inputs and what the code does with each (cite the branch). Mark each
-   handled, mishandled or unhandled.
-8. Diagram: one Mermaid flowchart of the algorithm, max 15 boxes.
-9. Failure behaviour: every way this agent can fail (bad input, missing file, empty or scanned page,
-   model timeout, 429, malformed model output, exception inside a sub-step). For each: what the code
-   does (raise, return failed, swallow), the effect on this agent's output and on the next agent,
-   and whether 04 covers it ("covered: 04 X" or "NEW"), and how an operator would
-   notice it today (log line, file, envelope field, or nothing; see 09). Then list what the agent
-   prints, logs or writes for debugging, with file:line, and the 3 signals an on-call engineer would
-   most need from this agent [IDEA].
-10. Accuracy risks: where it raises false alarms and where it misses real defects, with the code
-    reason. Then [IDEA] fixes.
-11. Interview Q&A: 5 questions an interviewer could ask about this agent, 3-5 sentences each.
-12. Glossary (new terms only, max 10) and Files read (one line).
+Pass A
+1. One-line answer: what this agent decides, and its possible verdicts.
+2. Altitude 30,000 ft: the problem for a human reviewer, with one realistic EN -> ES defect it
+   catches [EXAMPLE].
+3. Code map:
+   3a. Function inventory in call order: function, file:line range, called by, purpose, reads,
+       writes.
+   3b. Every constant, regex, table and threshold that affects a verdict, quoted, with file:line.
+   3c. Files read and written: path pattern, format, key fields.
+4. The algorithm, stage by stage. For each stage: input, what it does, how (rule, heuristic, the
+   exact library call, or model), output, file:line, and what it skips or loses.
+5. The decision: one table per value type or check. Columns: how it is detected, how it is
+   normalised, how source and target are paired, the comparison rule and tolerance, the verdict
+   code and severity it produces. Then the LLM's part: when it is called, the exact question, how
+   its answer changes the verdict, and what happens when the call fails or returns junk.
+6. From findings to the envelope: how findings become counts, metrics, confidence, gate signals
+   and output files. Table: metric, formula, inputs, file:line, real or proxy.
+Pass B
+7. Three traces with concrete values (one clean pair, one real defect, one tricky input). Show
+   every stage's intermediate value, ending in the exact finding record, metrics and gate signals.
+8. Test vectors (at least 20). Table: id, source, target, what a careful human expects, what the
+   code returned ([RUN] or [NOT RUN]), agree or disagree, deciding branch file:line. Include clean
+   pairs, real defects, locale formats and inputs built to break it.
+9. Edge cases (at least 12): the branch that handles each, and a verdict: handled, mishandled
+   (false alarm or miss) or unhandled (crash or skip). Cross-reference the vector ids.
+Pass C
+10. Failure behaviour: every way the agent can fail (bad input, missing file, empty or scanned
+    page, model timeout, 429, malformed model output, exception in a sub-step). For each: what the
+    code does (raise, return failed, swallow), the effect on this agent's output and the next
+    agent, "covered: 04 X" or "NEW", and how an operator would notice today (log line, file,
+    envelope field, or nothing; see 09).
+11. Debugging: what the agent prints, logs or writes, with file:line; the 3 signals an on-call
+    engineer would most need [IDEA].
+12. Accuracy: false alarms and misses, each tied to a vector or edge case and its code reason;
+    which metrics are real and which are proxies; then [IDEA] fixes ranked by effect.
+13. One Mermaid flowchart of the algorithm (max 15 boxes), then Interview Q&A: 6 questions,
+    3-5 sentences each, at least two on how a specific verdict is decided.
+14. Glossary (new terms only, max 10) and Files read (one line).
 ```
+
+**Pass B prompt (new chat, any checker agent)** — replace the two names in angle brackets.
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md (Pass B and "Running code") and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md. Pass A so far: #file:helix-study/<agent file>.md
+Agent: <agent folder>. Do Pass B only: append sections 7-9 to the same file.
+Use the function inventory in section 3a to choose what to import. If a run shows that Pass A
+was wrong, start section 7 with "Corrections to Pass A" and list each one with the evidence.
+Seed vectors to include (add your own to reach 20):
+- ntdc: "$1,250.50" vs "$1,250.50"; "$1,250.50" vs "1.250,50 $"; "$1,250.50" vs "$1,520.50";
+  "1.250" in English vs Spanish; "03/05/2026" copied unchanged; "March 5, 2026" vs
+  "5 de marzo de 2026"; "5:30 PM" vs "17:30" and "5:30 p. m."; "15%" vs "15 %"; "two" vs "dos" vs
+  "2"; a value present in source and missing in target; "$20" vs "$30"; a phone number
+  "1-800-555-0100"; a year "2026" alone; a range "5-10" vs "5 a 10"; a negative "(1,250)".
+- logo: same logo in both; logo missing; moved; scaled; replaced by a different graphic; two
+  identical logos on one page; page counts differ; a scanned page with no embedded images.
+- bisu: bold kept; bold lost; italic added; underline drawn as a line vs a font flag; size 10 vs
+  9.5; one source span split into two target spans; an all-caps heading; a bold word that moved.
+```
+
+**Pass C prompt (new chat, any agent)**
+
+```text
+Follow #file:helix-study/AGENT-DIVE.md (Pass C) and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md. Passes so far: #file:helix-study/<agent file>.md
+Agent: <agent folder>. Do Pass C only: append sections 10-14 to the same file.
+Use the vectors and edge cases in sections 8 and 9 as your evidence for section 12. For an agent
+with no Pass B, read the failure paths in the code yourself.
+```
+
+If a pass stops early, say in the same chat: "Continue. Write the missing sections."
 
 **02a — ntdc (numbers, dates, times, currencies)**
 
+02a is done. This optional vector pass adds the evidence table it lacks (new chat):
+
 ```text
-Follow #file:helix-study/AGENT-DIVE.md and #file:helix-study/STYLE.md.
-Known facts: #file:helix-study/FACTS.md.
+Follow #file:helix-study/AGENT-DIVE.md ("Running code" rules) and #file:helix-study/STYLE.md.
+Known facts: #file:helix-study/FACTS.md. Existing file: #file:helix-study/02a-agent-ntdc.md
+Agent: ntdc-agent. The file is already deep. Do not rewrite it. Append two sections:
 
-Agent: ntdc-agent (Numbers, Dates, Times, Currencies).
-Folder: agents/src/agents/activities/ntdc_agent/ - activity.py, mappers.py, contract/, and all of
-core/NTDC_Agent/ (including rule_validations.py, llm.py and AGENT_FLOW.md).
-
-Focus questions (answer them inside the shape):
-- How are numbers, dates, times and currencies found in source and target text: regex, a parser,
-  a library, the LLM? Show the patterns or functions.
-- How are values normalised across English and Spanish: decimal comma vs point, thousand separators,
-  date order and month names, 12-hour vs 24-hour time, currency symbol position, words vs digits?
-- How is each source value paired with its target value: segmentation results (which files and
-  fields), position, or value matching? What happens when the counts differ?
-- Each rule in rule_validations.py: what it checks, its severity, and an [EXAMPLE] that triggers it.
-- What makes a finding "critical"? How are CDER, F0.5 and FDR computed here, and from which counts?
-- When is needs_llm_review set, what do the two LLM prompts decide, and what happens per rule when
-  the LLM call fails (fail-open, 04 H and J)?
-- What exactly goes into manifest_json_path, and who reads it next?
-
-Write the result to helix-study/02a-agent-ntdc.md
+13. Test vectors: at least 25 synthetic region pairs run through the real core and mapper, with
+    call_llm stubbed to return None; run the digit/word vectors a second time with it stubbed to
+    return flagged=true. Table: id, source, target, what a careful reviewer expects, match_type and
+    rules the code returned [RUN], agree or disagree, deciding file:line.
+    Include the ntdc seed list from the Pass B prompt, plus: "$5" -> "$50"; "1" -> "10"; two "$5"
+    in the source and one in the target; "January 5" -> "5 de febrero" in a region containing
+    "tiene"; "8:00 am" -> "8:00 a.m."; "1.200,00 $"; a region with no numbers; target language "it";
+    a value moved into the next region; "$1,200" -> "$1,200.00".
+14. What the runs changed: every statement in sections 1-12 that a run contradicts, with the
+    evidence. Then the 5 most damaging behaviours, ranked by how often they would hit a real
+    US-Spanish member letter ([ASSUMPTION] allowed, with the reason).
 ```
 
 **02b — logo**
